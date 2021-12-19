@@ -1,0 +1,616 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#Functions needed to run:
+```{r fullmodel-fit-indices}
+MLX2<-function(submodels,saturated.submodels,data){
+  #submodels is a list containing the submodels in your model
+  # in the form of linear, generalized linear, generalized additive
+  # mixed models, or any other model object that has AIC and
+  #log-likelihood attributes.
+  #saturated.submodels is a list containing the submodels of your
+  # model that defines the saturated submodels (or otherwise)
+  #into which your model is properly nested.
+  #data is the data set
+  #
+  #number of submodels in full model
+  nobs<-dim(data)[1]
+  nsub<-length(submodels)
+  error.mes1<-error.mes2<-rep(FALSE,nsub)
+  #if there is an error in estimating a model, then error.mes==TRUE
+  #and don't calculate statistics
+  for(i in 1:nsub){
+    #check if the submodels and the saturated submodels are
+    #of the same class, and stop if not.
+    stopifnot(class(submodels[[i]])==
+                class(saturated.submodels[[i]]))
+    if(all(class(submodels[[i]])=="lm")){
+      error.mes1[i]<-error.mes2[i]<-FALSE
+    }
+    else{
+      error.mes1[i]<-!submodels[[i]]$converged & submodels[[i]]$boundary
+      error.mes2[i]<-!saturated.submodels[[i]]$converged & saturated.submodels[[i]]$boundary
+    }}
+  out<-data.frame(submodel=1:nsub,logLikelihoods=rep(NA,nsub),
+                  k=rep(NA,nsub),AICs=rep(NA,nsub),n.free.parameters=
+                    rep(NA,nsub))
+  out.saturated<-data.frame(submodel=1:nsub,logLikelihoods=rep(NA,nsub),
+                            k=rep(NA,nsub),AICs=rep(NA,nsub),
+                            n.free.parameters=rep(NA,nsub))
+  
+  #get likelihoods, AIC & k and store in "out"
+  for(i in 1:nsub){
+    out$logLikelihoods[i]<-logLik(submodels[[i]])
+    out$AICs[i]<-AIC(submodels[[i]])
+    out$k[i]<-nobs-df.residual(submodels[[i]])
+    out$n.free.parameters[i]<-attributes(logLik(submodels[[i]]))$df
+    out.saturated$n.free.parameters[i]<-attributes(logLik(saturated.submodels[[i]]))$df
+        out.saturated$logLikelihoods[i]<-logLik(saturated.submodels[[i]])
+    out.saturated$AICs[i]<-AIC(saturated.submodels[[i]])
+    out.saturated$k[i]<-nobs-df.residual(saturated.submodels[[i]])
+  }
+  #Overall k, AIC and likelihood for models:
+  model.AIC<-sum(out$AIC)
+  model.LL<-sum(out$logLikelihoods)
+#model df is the difference in the # of free parameters in the
+#less constrained model relative to the # of free parameters in the
+# more constrained (nested) model
+  model.df<-sum(out.saturated$n.free.parameters)-
+    sum(out$n.free.parameters)
+  n.free.parameters<-sum(out$n.free.parameters)
+  n.saturated.free.parameters<-sum(out.saturated$n.free.parameters)
+  saturated.model.AIC<-sum(out.saturated$AIC)
+  saturated.model.LL<-sum(out.saturated$logLikelihoods)
+  saturated.model.df<-sum(out.saturated$k)
+# the MLX2 statistic is the difference in likelihoods between the
+#more constrained (nested) model and the less constrained model;
+#usually the saturated model
+  X2<--2*(model.LL-saturated.model.LL)
+  if(X2<0)X2<-NA
+#  df<-saturated.model.df-model.df
+  null.prob<-NA
+#Only calculate null prob if the X2 is valid with valid df
+  if(!is.na(X2)&(model.df>0))null.prob<-1-pchisq(X2,model.df)
+  #check if any models had errors in estimation
+  error.flag<-sum(error.mes1)+sum(error.mes2)
+  list(model.X2=X2,model.df=model.df,null.prob=null.prob,
+       model.loglikelihood=model.LL,
+       n.free.parameters=n.free.parameters,
+       n.free.parameters.saturated=n.saturated.free.parameters,
+       saturated.model.loglikelihood=saturated.model.LL,
+       model.AIC=model.AIC,submodels=submodels,error.flag=error.flag)
+}
+```
+#Function for calculating effective sample size from Moran's I and actual sample size
+```{r effective-sample-size}
+N.eff<-function(I,N){ #input values: Moran's I estimate, variable sample size
+  result<-N*(1-I)/(1+I) #calculate n' using Cressie 2015's equation
+  return(result)
+}
+```
+#Function for calculating adjusted model parameters
+```{r model-adjuster}
+mod.adjuster<-function(mod,N.eff){ #input values: model object to be adjusted, n' value
+  std.errors<-coef(summary(mod))[,2]
+  estimates<-coef(summary(mod))[,1] #store standard errors and coefficient estimates of model
+  
+  N<-length(mod$fitted.values) #pull out variable sample size from model
+  adj.index<-sqrt(N/N.eff)
+  
+  SE.adj<-std.errors*adj.index #adjust standard errors
+  t.adj<-estimates/SE.adj
+  p.adj<-2*pt(-abs(t.adj),df = N.eff - 1) #adjust p values using adjusted t values
+  
+  df.results<-data.frame(SE.adj,p.adj)
+  return(df.results)
+}
+```
+#Function for revising the dataframe to reflect spot-checked photos
+```{r df-reviser}
+df.reviser<-function(file,df,colnum = NA){  #function for revising datasets to reflect spot checked values
+  
+bot.rev<-read.delim(file = file)
+int.mod<-df
+
+print(paste("Number of false positives found:",sum(bot.rev[,3] == 0)))
+
+if(is.na(colnum) == FALSE){
+  print(paste("Number of positives in original dataframe:",sum(as.numeric(df[,colnum] > 0))))
+}
+
+for (i in 1:length(bot.rev[,1])) {
+  response<-bot.rev[i,3]
+  
+  if (response != 0 & response != 1){
+    print("mistakes were made")
+    print(response)
+    print(bot.rev[i,])
+  }
+
+  if (response == 0){
+    row<-bot.rev[i,1]
+    DSC<-bot.rev[i,2]
+    
+    
+    for (j in 1:length(df[,1])) {
+      ref.row<-df$Row
+        ref.row<-ref.row[j]
+      ref.DSC<-df$Image_Id
+        ref.DSC<-ref.DSC[j]
+      if (row == ref.row & DSC == ref.DSC){
+        int.mod[j,colnum]<-response
+      }
+    }
+  }
+}
+print(paste("Adjusted number of observations:", sum(as.numeric(int.mod[,colnum] > 0))))
+  return(int.mod)
+}
+```
+#Function for range adjusted coefficient calculation
+```{r coef-stdizer}
+range.std.coef<-function(PAmod,Pmod,data){ #takes presence/absence and abundance models for input, and the dataframe used for modelling
+  PAcoef_names<-names(PAmod$coefficients)
+    PAcoef_names<-PAcoef_names[-1]  #remove the intercept
+  df_names<-names(data)
+  
+  PA_vars_stats<-matrix(ncol = length(PAcoef_names),nrow = 3)
+  n<-0
+for (h in 1:length(PAcoef_names)) {
+  for (i in 1:length(df_names)) {
+    if(df_names[i] == PAcoef_names[h]){
+      n<-n + 1
+
+      PA_vars_stats[1,n]<-mean(data[,i])  #stores the mean value of each predictor variable
+      PA_vars_stats[2,n]<-min(data[,i])   #stores the min value
+      PA_vars_stats[3,n]<-max(data[,i])   #stores the max value
+      break
+    }
+  }
+}
+  
+  Pcoef_names<-names(Pmod$coefficients)
+    Pcoef_names<-Pcoef_names[-1]  #remove the intercept
+  df_names<-names(data)
+  
+  P_vars_stats<-matrix(ncol = length(Pcoef_names),nrow = 3)
+  
+  m<-0
+for (j in 1:length(Pcoef_names)) {
+  for (k in 1:length(df_names)) {
+    if(df_names[k] == Pcoef_names[j]){
+      m<-m + 1
+      
+      P_vars_stats[1,m]<-mean(data[,k])  #stores the mean value of each predictor variable
+      P_vars_stats[2,m]<-min(data[,k])   #stores the min value
+      P_vars_stats[3,m]<-max(data[,k])   #stores the max value
+      break
+    }
+  }
+} 
+  #find the range of the dependent variable in the models
+  dep_var_name<-names(Pmod$model)[1] #use presence since PA is a binary dependent var
+  for (b in 1:length(df_names)) {
+    if(df_names[b] == dep_var_name){
+      dep_var<-data[,b]
+      
+      var_range_vals<-range(data[,b])
+      var_range<-var_range_vals[2] - var_range_vals[1]
+      break
+    }
+  }  
+  
+#calculate max and min values for each predictor in the presence/absence model  
+  PAcoef<-PAmod$coefficients
+  PAmod_mean_vals<-c()
+  PAmod_max_vals<-c()
+  PAmod_min_vals<-c()
+  
+  for (z in 1:length(PAcoef_names)) {
+    PAmod_mean_vals[z]<-PAcoef[z+1] * PA_vars_stats[1,z]
+    PAmod_min_vals[z]<-PAcoef[z+1] * PA_vars_stats[2,z]
+    PAmod_max_vals[z]<-PAcoef[z+1] * PA_vars_stats[3,z]
+  }
+#calculate max and min values for each predictor in the abundance model
+  Pcoef<-Pmod$coefficients
+  Pmod_mean_vals<-c()
+  Pmod_max_vals<-c()
+  Pmod_min_vals<-c()
+  for (z in 1:length(Pcoef_names)) {
+    Pmod_mean_vals[z]<-Pcoef[z+1] * P_vars_stats[1,z]
+    Pmod_min_vals[z]<-Pcoef[z+1] * P_vars_stats[2,z]
+    Pmod_max_vals[z]<-Pcoef[z+1] * P_vars_stats[3,z]
+  }
+  
+##In the case of a model with differing sets of coefficients, different procedure is needed
+ if ( length(Pcoef_names) != length(PAcoef_names)){ #test for difference
+  
+  if(length(PAcoef_names) > length(Pcoef_names)){#establish which model is longer
+    long_list<-PAcoef_names
+    id<-'PA'   #marker for later use
+    alt.id<-'P'
+    short_list<-Pcoef_names
+  }
+  else{
+      long_list<-Pcoef_names
+      short_list<-PAcoef_names
+      id<-'P'
+      alt.id<-'PA'
+    }
+  
+  dupes<-match(x = long_list,short_list)  #find the positions of matching coefficients 
+  dupeShort<-match(short_list,long_list)     
+  
+  
+  #vectors to store calculated values
+  max.toggle<-c()
+  min.toggle<-c()
+  diff.vec<-c()
+  for (j in 1:length(dupes)) { #loop through the longer model
+    if(is.na(dupes[j]) != TRUE){ #when this statement is TRUE, coef present in both models
+      d<-dupes[j]
+      if(id == 'PA'){ #a TRUE here indicates the presence/absence model is longer
+        PAmax_toggle<-1/(1+1/(exp(PAcoef[1] + PAmod_max_vals[j] + sum(PAmod_mean_vals[-j]))))
+        Pmax_toggle<-Pcoef[1] + Pmod_max_vals[d] + sum(Pmod_mean_vals[-d])
+        
+        PAmin_toggle<-1/(1+1/(exp(PAcoef[1] + PAmod_min_vals[j] + sum(PAmod_mean_vals[-j]))))
+        Pmin_toggle<-Pcoef[1] + Pmod_min_vals[d] + sum(Pmod_mean_vals[-d])
+        
+        max.toggle[j]<-PAmax_toggle*Pmax_toggle
+        min.toggle[j]<-PAmin_toggle*Pmin_toggle
+        diff.vec[j]<-max.toggle[j] - min.toggle[j]
+      }
+      else{ #indicates that presence model is longer, so reverse the indexes
+        Pmax_toggle<-Pcoef[1] + Pmod_max_vals[j] + sum(Pmod_mean_vals[-j])
+        PAmax_toggle<-1/(1+1/(exp(PAcoef[1] + PAmod_max_vals[d] + sum(PAmod_mean_vals[-d]))))
+        
+        Pmin_toggle<-Pcoef[1] + Pmod_min_vals[j] + sum(Pmod_mean_vals[-j])
+        PAmin_toggle<-1/(1+1/(exp(PAcoef[1] + PAmod_min_vals[d] + sum(PAmod_mean_vals[-d]))))
+        
+        max.toggle[j]<-PAmax_toggle*Pmax_toggle
+        min.toggle[j]<-PAmin_toggle*Pmin_toggle
+        diff.vec[j]<-max.toggle[j] - min.toggle[j]
+      }
+    }
+  else{ #indicates that the coef is unique to the long model
+    if(id == 'PA'){ #longer mod is PA
+        PAmax_toggle<-1/(1+1/(exp(PAcoef[1] + PAmod_max_vals[j] + sum(PAmod_mean_vals[-j]))))
+        Pmax_toggle<-Pcoef[1] + sum(Pmod_mean_vals) #no longer need to worry about max
+        
+        PAmin_toggle<-1/(1+1/(exp(PAcoef[1] + PAmod_min_vals[j] + sum(PAmod_mean_vals[-j]))))
+        Pmin_toggle<-Pcoef[1] + sum(Pmod_mean_vals) # or mins
+        
+        max.toggle[j]<-PAmax_toggle*Pmax_toggle
+        min.toggle[j]<-PAmin_toggle*Pmin_toggle
+        diff.vec[j]<-max.toggle[j] - min.toggle[j]
+      }
+      else{ #the longer model is presence
+        Pmax_toggle<-Pcoef[1] + Pmod_max_vals[j] + sum(Pmod_mean_vals[-j])
+        PAmax_toggle<-1/(1+1/(exp(PAcoef[1] + sum(PAmod_mean_vals))))
+        
+        Pmin_toggle<-Pcoef[1] + Pmod_min_vals[j] + sum(Pmod_mean_vals[-j])
+        PAmin_toggle<-1/(1+1/(exp(PAcoef[1] + sum(PAmod_mean_vals))))
+        
+        max.toggle[j]<-PAmax_toggle*Pmax_toggle
+        min.toggle[j]<-PAmin_toggle*Pmin_toggle
+        diff.vec[j]<-max.toggle[j] - min.toggle[j]
+      }
+  }  
+  }
+  #separate vectors for the short model coef
+  max.toggleS<-c()
+  min.toggleS<-c()
+  diff.vecS<-c()
+  for (j in 1:length(dupeShort)) { #this one loops through the shorter length mod
+    if(is.na(dupeShort[j]) != TRUE){#TRUE here indicates coefficient is present in both mods
+      d<-dupeShort[j]
+      if(id != 'PA'){ #PA is shorter (switched the logic, kept indexing the same)
+        PAmax_toggle<-1/(1+1/(exp(PAcoef[1] + PAmod_max_vals[j] + sum(PAmod_mean_vals[-j]))))
+        Pmax_toggle<-Pcoef[1] + Pmod_max_vals[d] + sum(Pmod_mean_vals[-d])
+        
+        PAmin_toggle<-1/(1+1/(exp(PAcoef[1] + PAmod_min_vals[j] + sum(PAmod_mean_vals[-j]))))
+        Pmin_toggle<-Pcoef[1] + Pmod_min_vals[d] + sum(Pmod_mean_vals[-d])
+        
+        max.toggleS[j]<-PAmax_toggle*Pmax_toggle
+        min.toggleS[j]<-PAmin_toggle*Pmin_toggle
+        diff.vecS[j]<-max.toggleS[j] - min.toggleS[j]
+      }
+      else{ #P is shorter
+        Pmax_toggle<-Pcoef[1] + Pmod_max_vals[j] + sum(Pmod_mean_vals[-j])
+        PAmax_toggle<-1/(1+1/(exp(PAcoef[1] + PAmod_max_vals[d] + sum(PAmod_mean_vals[-d]))))
+        
+        Pmin_toggle<-Pcoef[1] + Pmod_min_vals[j] + sum(Pmod_mean_vals[-j])
+        PAmin_toggle<-1/(1+1/(exp(PAcoef[1] + PAmod_min_vals[d] + sum(PAmod_mean_vals[-d]))))
+        
+        max.toggleS[j]<-PAmax_toggle*Pmax_toggle
+        min.toggleS[j]<-PAmin_toggle*Pmin_toggle
+        diff.vecS[j]<-max.toggleS[j] - min.toggleS[j]
+      }
+    }
+    else{ #coef is unique to the shorter model
+    if(id != 'PA'){ #PA is shorter
+        PAmax_toggle<-1/(1+1/(exp(PAcoef[1] + PAmod_max_vals[j] + sum(PAmod_mean_vals[-j]))))
+        Pmax_toggle<-Pcoef[1] + sum(Pmod_mean_vals)
+        
+        PAmin_toggle<-1/(1+1/(exp(PAcoef[1] + PAmod_min_vals[j] + sum(PAmod_mean_vals[-j]))))
+        Pmin_toggle<-Pcoef[1] + sum(Pmod_mean_vals)
+        
+        max.toggleS[j]<-PAmax_toggle*Pmax_toggle
+        min.toggleS[j]<-PAmin_toggle*Pmin_toggle
+        diff.vecS[j]<-max.toggleS[j] - min.toggleS[j]
+      }
+      else{ #P is shorter
+        Pmax_toggle<-Pcoef[1] + Pmod_max_vals[j] + sum(Pmod_mean_vals[-j])
+        PAmax_toggle<-1/(1+1/(exp(PAcoef[1] + sum(PAmod_mean_vals))))
+        
+        Pmin_toggle<-Pcoef[1] + Pmod_min_vals[j] + sum(Pmod_mean_vals[-j])
+        PAmin_toggle<-1/(1+1/(exp(PAcoef[1] + sum(PAmod_mean_vals))))
+        
+        max.toggleS[j]<-PAmax_toggle*Pmax_toggle
+        min.toggleS[j]<-PAmin_toggle*Pmin_toggle
+        diff.vecS[j]<-max.toggleS[j] - min.toggleS[j]
+        }
+      }
+  }  
+  #divide by the variable's range to gain a vector of standardized coefficients
+  std_long<-diff.vec/var_range
+  std_short<-diff.vecS/var_range
+  
+  #put together cohesive object for return value
+  long_name<-paste(id," model std coef")
+  short_name<-paste(alt.id," model std coef")
+  
+  std_long<-data.frame(std_long,row.names = long_list)
+    colnames(std_long)<-long_name
+    
+  std_short<-data.frame(std_short,row.names = short_list)
+    colnames(std_short)<-short_name
+  
+  print(paste(long_list,"long mod:",max.toggle,min.toggle))
+  print(paste(short_list,"short mod:",max.toggleS,min.toggleS))
+  print(paste(long_list,"long mod:", std_long))
+  print(paste(short_list, "short model:",std_short))
+  
+  result<-list(std_long,std_short)
+    names(result)<-c(long_name,short_name)
+  
+  return(result)
+     }
+
+  #this code can carry out the simpler case of models with the same coefficients
+  
+  PAmax_toggle<-c()  #create vectors for maximum/minimum values of presence/absence model
+  PAmin_toggle<-c()
+  for (y in 1:length(PA_vars_stats[1,])) {
+    PAmax_toggle[y]<-1/(1+1/(exp(PAcoef[1] + PAmod_max_vals[y] + sum(PAmod_mean_vals[-y]))))#need to transform from logit
+    PAmin_toggle[y]<-1/(1+1/(exp(PAcoef[1] + PAmod_min_vals[y] + sum(PAmod_mean_vals[-y]))))
+  }
+  
+  Pmax_toggle<-c()   #create vectors for maximum/minimum values of presence/absence model
+  Pmin_toggle<-c()
+  for (y in 1:length(P_vars_stats[1,])) {
+    Pmax_toggle[y]<-Pcoef[1] + Pmod_max_vals[y] + sum(Pmod_mean_vals[-y])
+    Pmin_toggle[y]<-Pcoef[1] + Pmod_min_vals[y] + sum(Pmod_mean_vals[-y])
+  }
+  #calculate the combined max/min toggles 
+  max_toggle<-PAmax_toggle * Pmax_toggle
+  min_toggle<-PAmin_toggle * Pmin_toggle
+  
+  #calculate the full model mean, and print it alongsidde dependent variable mean
+  full_mod_mean<-(Pcoef[1] + sum(Pmod_mean_vals)) * 1/(1+1/(exp((PAcoef[1] + sum(PAmod_mean_vals)))))
+  print(paste("Model mean:",signif(full_mod_mean,digits = 5))) #calculate and report the mean
+  print(paste("Dependent Var. Mean: ",mean(dep_var)))
+  
+  diff_vector<-max_toggle - min_toggle  #take the difference between maximum and minimum toggle
+  stdized_vector<-diff_vector/var_range #divide by variable range
+    
+  
+  
+    for (p in seq(length(stdized_vector))) { #print each of the standardized coefficients
+      print(paste(PAcoef_names[p],"=",signif(stdized_vector[p],digits = 5),"(Range standardized)"))
+    }
+  
+  result<-rbind(PAcoef_names,stdized_vector) #cohesive table to be returned
+  
+  return(result)
+}
+```
+
+#SPARTINA submodel
+```{r data-read-in}
+#file name is data specific
+preCNNdata<-read.csv("2014_plants_snail_xy_data.csv")
+  preCNNdata<-na.omit(preCNNdata)
+```
+#read in revised data and replace values
+```{r}
+CNNdata<-df.reviser('BatisCheck.txt',preCNNdata,12)  #use column 12 for Batis (this is all dataframe dependent)
+CNNdata<-df.reviser('SpartCheck.txt',CNNdata,9)  #use column 9 for Spartina
+CNNdata<-df.reviser('LimoCheck.txt',CNNdata,10)  #use column 10 for Limonium
+CNNdata<-df.reviser('BorrCheck.txt',CNNdata,11)  #use column 11 for Borr
+CNNdata<-df.reviser('JuncCheck.txt',CNNdata,13)  #use column 13 for Juncus
+CNNdata<-df.reviser('SarcCheck.txt',CNNdata,8)  #use column 8 for Sarcocornia
+```
+
+#create a marker for the nonhospitable habitat (salt pan in the site interior)
+```{r saltpan-marker}
+saltpan<-ifelse(CNNdata$Spart==0 & CNNdata$Sarc==0 & CNNdata$Limon==0 & CNNdata$Batis==0 & CNNdata$Bor==0 & CNNdata$Juncus==0 & CNNdata$salinity..psu.>60, 1,0)
+#append these markers to our data frame
+CNNdata$saltpanYN<-saltpan
+```
+#separate dataframe into hospitable/inhospitable, and present/absent within hospitable
+```{r}
+#first put in present/absence and log transformed columns
+CNNdata$spartPA<-ifelse(CNNdata$Spart>0,1,0)
+CNNdata$logSpart<-log1p(CNNdata$Spart)
+#now split the data sets
+spart.hab<-subset(CNNdata,saltpanYN==0)
+spart.inhosp<-subset(CNNdata,saltpanYN==1)
+```
+#conduct logistic regression on the PA data with the hospitable habitat df
+```{r}
+spartPAmod1<-glm(spartPA~salinity..psu. + Juncus + Bor,family = 'binomial',data = spart.hab)
+
+library(MASS)
+spartStep<-stepAIC(spartPAmod1,direction = "both")
+spartStep$anova
+
+#initial model selected
+```
+
+```{r}
+#examine the selected model
+summary(spartPAmod1)
+#all coefficients have significant p vals
+
+#store presence/absence model residuals
+PA.resid<-resid(spartPAmod1)
+```
+#conduct loglinear regression on positive spartina values
+```{r}
+spart.habY<-subset(spart.hab,spartPA==1)  #create a df for only observations with Spartina present
+
+spartPmod1<-lm(logSpart~salinity..psu. + Juncus + Bor,data = spart.habY)
+
+spartStep2<-stepAIC(spartPmod1,direction = "both")
+spartStep2$anova
+
+#initial model selected
+```
+
+```{r}
+#view the model
+summary(spartPmod1)
+#all coefficients have significant p vals
+
+#store abundance model residuals
+P.resid<-resid(spartPmod1)
+```
+#capture predictions for both models
+```{r}
+#create objects for loglinear prediction equation
+sal<-spart.habY$salinity..psu.
+Junc<-spart.habY$Juncus
+Bor<-spart.habY$Bor
+
+LLpred<- 3.189053  - 0.010818*sal - 0.037314*Junc - 0.175844*Bor
+
+spart.hab$spartLMpred<-0   
+n<-0
+for (i in 1:length(spart.hab[,1])) {   #index in the LM productivity estimates to spart.hab
+  test<-spart.hab$logSpart[i]
+  if(test > 0 ){ #productivity estimate is zero where not present
+    n<-n+1
+    
+    spart.hab$spartLMpred[i]<-LLpred[n]  
+  }
+}
+
+#get logistic predictions from model
+spart.hab$spartLOGpred<-predict(spartPAmod1,type = "response")
+
+#insert 0 predictions for each value in the salt pan
+spart.inhosp$spartLOGpred<-0
+spart.inhosp$spartLMpred<-0
+```
+
+#Autocorrelation corrections for each model part (1st order, based on Grace's slides and Cressie's correction)
+```{r}
+library(spdep) #library the spatial dependance package
+
+PAxy.data<-cbind(spart.hab$easting..m.,spart.hab$northing..m.) #carry out two lines of Moran's I testing
+Pxy.data<-cbind(spart.habY$easting..m.,spart.habY$northing..m.)
+
+PAxy.knn<-knearneigh(PAxy.data,k = 4)
+PAxy.nb<-knn2nb(PAxy.knn)
+
+Pxy.knn<-knearneigh(Pxy.data,k = 4)
+Pxy.nb<-knn2nb(Pxy.knn)
+
+PA.spart.Moran<-moran.test(PA.resid,nb2listw(PAxy.nb,style ="W"))
+P.spart.Moran<-moran.test(P.resid,nb2listw(Pxy.nb,style ="W"))
+```
+#calculate effective sample size and modify model standard errors and p values
+```{r}
+PAspartNeff<-as.numeric(N.eff(PA.spart.Moran$estimate[1],length(spart.hab[,1]))) #calculate n' for each model
+PspartNeff<-as.numeric(N.eff(P.spart.Moran$estimate[1],length(spart.habY[,1])))
+
+mod.adjuster(spartPAmod1,PAspartNeff) #look at adjusted parameters for both models
+mod.adjuster(spartPmod1,PspartNeff)
+
+#evaluate p values for increases above 0.05
+```
+
+#Merge the predictions from the two models
+```{r}
+#bind the two dataframes together, and create a cohesive prediction value column
+spart.merge<-rbind(spart.hab,spart.inhosp)
+#create a merged prediction by multiplying two predictions together, as in Schibalski et al 2015
+spart.merge$spartPRED<-spart.merge$spartLOGpred*spart.merge$spartLMpred
+```
+
+#regress our cohesive predictive value against the observed value
+```{r}
+spartFmod<-lm(spart.merge$logSpart ~ spart.merge$spartPRED)
+
+summary(spartFmod)
+
+#store R^2 and adjusted R^2 vals
+spartR2<-summary(spartFmod)$r.squared
+spartR2adj<-summary(spartFmod)$adj.r.squared
+```
+#calculate R2 and standardize coefficients
+```{r}
+spart_coef<-range.std.coef(spartPAmod1,spartPmod1,CNNdata)
+```
+
+#load functions
+```{r plot-residuals}
+# FUNCTION TO CREATE AND PRINT SERIES OF PLOTS
+Plot1vsMany <- function(y.var,set.x) {
+  xy = cbind(y.var, set.x)
+  N=dim(set.x)
+  n=N[2] +1
+  for(i in 2:n){
+    j=i-1
+    dev.new(height=6,width=6)
+    plot(xy[,1] ~ xy[,i],
+         pch=16,
+         xlab=names(set.x[j]),
+         ylab=names(y.var));
+    abline(lm(xy[,1] ~ xy[,i]))
+  }
+}
+```
+```{r examine-correlations}
+# FUNCTION TO CREATE AND PRINT VECTOR OF CORRELATIONS
+Cor1vsMany <- function(y.var,set.x) {
+  N=dim(set.x)
+  n=N[2]
+  cor.out=vector(length=n)
+  for(i in 1:n){ 
+    cor.out[i]=cor(y.var, set.x[i], use="pairwise.complete.obs")
+  }
+  names(cor.out)= names(set.x)
+  outfile=data.frame(cor.out)
+  print(outfile,digits=2)
+}
+```
+#create exogenous and predictive variable dataframe
+```{r}
+#we have a problem here, the merge df do not match in terms of obs indexing...
+SpartResid<-spart.merge$logSpart - spart.merge$spartPRED
+SarcResid<-sarc.merge$logSarc - sarc.merge$sarcPRED
+BatisResid<-batis.merge$logBatis - batis.merge$batisPRED
+BorrResid<-borr.merge$logBorr - borr.merge$borrPRED
+LimoResid<-limo.merge$logLimon - limo.merge$limoPRED
+JuncResid<-junc.merge$logjunc - junc.merge$juncPRED
+
+residuals_exam_df<-data.frame()
+```
+
