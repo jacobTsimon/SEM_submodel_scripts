@@ -1,5 +1,5 @@
 ---
-title: "Untitled"
+title: "BORRICHIA SUBMODEL"
 output: html_document
 ---
 
@@ -7,93 +7,12 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+#TITLE: Borrichia submodel script
+#AUTHOR: Jacob Simon
+#CONTACT: jts30437@uga.edu
+#LAST UPDATED: 02/02/2022
+
 #Functions needed to run:
-```{r fullmodel-fit-indices}
-MLX2<-function(submodels,saturated.submodels,data){
-  #submodels is a list containing the submodels in your model
-  # in the form of linear, generalized linear, generalized additive
-  # mixed models, or any other model object that has AIC and
-  #log-likelihood attributes.
-  #saturated.submodels is a list containing the submodels of your
-  # model that defines the saturated submodels (or otherwise)
-  #into which your model is properly nested.
-  #data is the data set
-  #
-  #number of submodels in full model
-  nobs<-dim(data)[1]
-  nsub<-length(submodels)
-  error.mes1<-error.mes2<-rep(FALSE,nsub)
-  #if there is an error in estimating a model, then error.mes==TRUE
-  #and don't calculate statistics
-  for(i in 1:nsub){
-    #check if the submodels and the saturated submodels are
-    #of the same class, and stop if not.
-    stopifnot(class(submodels[[i]])==
-                class(saturated.submodels[[i]]))
-    if(all(class(submodels[[i]])=="lm")){
-      error.mes1[i]<-error.mes2[i]<-FALSE
-    }
-    else{
-      error.mes1[i]<-!submodels[[i]]$converged & submodels[[i]]$boundary
-      error.mes2[i]<-!saturated.submodels[[i]]$converged & saturated.submodels[[i]]$boundary
-    }}
-  out<-data.frame(submodel=1:nsub,logLikelihoods=rep(NA,nsub),
-                  k=rep(NA,nsub),AICs=rep(NA,nsub),n.free.parameters=
-                    rep(NA,nsub))
-  out.saturated<-data.frame(submodel=1:nsub,logLikelihoods=rep(NA,nsub),
-                            k=rep(NA,nsub),AICs=rep(NA,nsub),
-                            n.free.parameters=rep(NA,nsub))
-  
-  #get likelihoods, AIC & k and store in "out"
-  for(i in 1:nsub){
-    out$logLikelihoods[i]<-logLik(submodels[[i]])
-    out$AICs[i]<-AIC(submodels[[i]])
-    out$k[i]<-nobs-df.residual(submodels[[i]])
-    out$n.free.parameters[i]<-attributes(logLik(submodels[[i]]))$df
-    out.saturated$n.free.parameters[i]<-attributes(logLik(saturated.submodels[[i]]))$df
-        out.saturated$logLikelihoods[i]<-logLik(saturated.submodels[[i]])
-    out.saturated$AICs[i]<-AIC(saturated.submodels[[i]])
-    out.saturated$k[i]<-nobs-df.residual(saturated.submodels[[i]])
-  }
-  #Overall k, AIC and likelihood for models:
-  model.AIC<-sum(out$AIC)
-  model.LL<-sum(out$logLikelihoods)
-#model df is the difference in the # of free parameters in the
-#less constrained model relative to the # of free parameters in the
-# more constrained (nested) model
-  model.df<-sum(out.saturated$n.free.parameters)-
-    sum(out$n.free.parameters)
-  n.free.parameters<-sum(out$n.free.parameters)
-  n.saturated.free.parameters<-sum(out.saturated$n.free.parameters)
-  saturated.model.AIC<-sum(out.saturated$AIC)
-  saturated.model.LL<-sum(out.saturated$logLikelihoods)
-  saturated.model.df<-sum(out.saturated$k)
-# the MLX2 statistic is the difference in likelihoods between the
-#more constrained (nested) model and the less constrained model;
-#usually the saturated model
-  X2<--2*(model.LL-saturated.model.LL)
-  if(X2<0)X2<-NA
-#  df<-saturated.model.df-model.df
-  null.prob<-NA
-#Only calculate null prob if the X2 is valid with valid df
-  if(!is.na(X2)&(model.df>0))null.prob<-1-pchisq(X2,model.df)
-  #check if any models had errors in estimation
-  error.flag<-sum(error.mes1)+sum(error.mes2)
-  list(model.X2=X2,model.df=model.df,null.prob=null.prob,
-       model.loglikelihood=model.LL,
-       n.free.parameters=n.free.parameters,
-       n.free.parameters.saturated=n.saturated.free.parameters,
-       saturated.model.loglikelihood=saturated.model.LL,
-       model.AIC=model.AIC,submodels=submodels,error.flag=error.flag)
-}
-```
-#Function for calculating effective sample size from Moran's I and actual sample size
-```{r effective-sample-size}
-N.eff<-function(I,N){ #input values: Moran's I estimate, variable sample size
-  result<-N*(1-I)/(1+I) #calculate n' using Cressie 2015's equation
-  return(result)
-}
-```
 #Function for calculating adjusted model parameters
 ```{r model-adjuster}
 mod.adjuster<-function(mod,N.eff){ #input values: model object to be adjusted, n' value
@@ -424,9 +343,9 @@ for (j in 1:length(Pcoef_names)) {
 
 #BORRICHIA submodel
 ```{r data-read-in}
-#file name is computer specific
+#this load method is relative to the working directory - adjust your files as needed
 preCNNdata<-read.csv("2014_plants_snail_xy_data.csv")
-  preCNNdata<-na.omit(CNNdata)
+  preCNNdata<-na.omit(preCNNdata)
 ```
 #read in revised data and replace values
 ```{r}
@@ -549,9 +468,9 @@ P.borr.Moran<-moran.test(P.resid,nb2listw(Pxy.nb,style ="W"))
 
 #compute adjusted sample size, standard errors and p values
 ```{r}
-PAborrNeff<-as.numeric(N.eff(PA.borr.Moran$estimate[1],length(borr.hab[,1]))) #calculate n' for each model
+PAborrNeff<-as.numeric(N.eff(PA.borr.Moran$estimate[1],length(borr.hab[,1]))) #calculate n' for each model using function written above
 PborrNeff<-as.numeric(N.eff(P.borr.Moran$estimate[1],length(borr.habY[,1])))
-
+#n' values added to column 3 & 4 of Table 2
 
 mod.adjuster(borrPAmod1,PAborrNeff) #adjust each model and print values
 mod.adjuster(borrPmod2,PborrNeff)
@@ -578,57 +497,7 @@ borrR2adj<-summary(borrFmod)$adj.r.squared
 ```
 #calculate R2 and standardize coefficients
 ```{r}
-borr_coef<-range.std.coef(borrPAmod1,borrPmod2,CNNdata)
+borr_coef<-range.std.coef(borrPAmod1,borrPmod2,CNNdata)#calculate final range standardized coefficients
+print(borr_coef)
 ```
-#check the fuctions performance on models with different variables
-```{r}
-elev<-mean(CNNdata$elevation..m.)
-sal<-mean(CNNdata$salinity..psu.)
-Junc<-mean(CNNdata$Juncus)
 
-maxElev<-max(CNNdata$elevation..m.)
-maxSal<-max(CNNdata$salinity..psu.)
-maxJunc<-max(CNNdata$Juncus)
-
-minElev<-min(CNNdata$elevation..m.)
-minSal<-min(CNNdata$salinity..psu.)
-minJunc<-min(CNNdata$Juncus)
-
-PAcoef<-borrPAmod1$coefficients
-Pcoef<-borrPmod2$coefficients
-
-
-maxElev<-(1/(1+1/(exp(PAcoef[1] + PAcoef[2]*maxElev + PAcoef[3]*sal + PAcoef[4]*Junc))))*(Pcoef[1] + Pcoef[2]*maxElev + Pcoef[3]*Junc)
-print(paste("max Elev toggle:",maxElev))
-
-maxSal<-(1/(1+1/(exp(PAcoef[1] + PAcoef[2]*elev + PAcoef[3]*maxSal + PAcoef[4]*Junc))))*(Pcoef[1] + Pcoef[2]*elev + Pcoef[3]*Junc)
-print(paste("max Sal toggle:",maxSal))
-
-maxJunc<-(1/(1+1/(exp(PAcoef[1] + PAcoef[2]*elev + PAcoef[3]*sal + PAcoef[4]*maxJunc))))*(Pcoef[1] + Pcoef[2]*elev + Pcoef[3]*maxJunc)
-print(paste("max Junc toggle:",maxJunc))
-
-
-minElev<-(1/(1+1/(exp(PAcoef[1] + PAcoef[2]*minElev + PAcoef[3]*sal + PAcoef[4]*Junc))))*(Pcoef[1] + Pcoef[2]*minElev + Pcoef[3]*Junc)
-print(paste("min Elev toggle:",minElev))
-
-minSal<-(1/(1+1/(exp(PAcoef[1] + PAcoef[2]*elev + PAcoef[3]*minSal + PAcoef[4]*Junc))))*(Pcoef[1] + Pcoef[2]*elev + Pcoef[3]*Junc)
-print(paste("min Sal toggle:",minSal))
-
-minJunc<-(1/(1+1/(exp(PAcoef[1] + PAcoef[2]*elev + PAcoef[3]*sal + PAcoef[4]*minJunc))))*(Pcoef[1] + Pcoef[2]*elev + Pcoef[3]*minJunc)
-print(paste("min Junc toggle",minJunc))
-
-diffElev<-maxElev - minElev
-diffSal<-maxSal - minSal
-diffJunc<-maxJunc - minJunc
-
-rangeBorr<-range(CNNdata$logBorr)
-  rangeBorr<-rangeBorr[2] - rangeBorr[1]
-
-stdElev<-diffElev/rangeBorr
-stdSal<-diffSal/rangeBorr
-stdJunc<-diffJunc/rangeBorr
-
-print(paste("Standardized Elevation:", stdElev))
-print(paste("Standardized Salinity:", stdSal))
-print(paste("Standardized Juncus:",stdJunc))
-```

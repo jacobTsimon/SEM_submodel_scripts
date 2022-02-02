@@ -1,91 +1,17 @@
 ---
-title: "Untitled"
+title: "SPARTINA SUBMODEL"
 output: html_document
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
+#TITLE: Spartina submodel script
+#AUTHOR: Jacob Simon
+#CONTACT: jts30437@uga.edu
+#LAST UPDATED: 02/02/2022
+
 #Functions needed to run:
-```{r fullmodel-fit-indices}
-MLX2<-function(submodels,saturated.submodels,data){
-  #submodels is a list containing the submodels in your model
-  # in the form of linear, generalized linear, generalized additive
-  # mixed models, or any other model object that has AIC and
-  #log-likelihood attributes.
-  #saturated.submodels is a list containing the submodels of your
-  # model that defines the saturated submodels (or otherwise)
-  #into which your model is properly nested.
-  #data is the data set
-  #
-  #number of submodels in full model
-  nobs<-dim(data)[1]
-  nsub<-length(submodels)
-  error.mes1<-error.mes2<-rep(FALSE,nsub)
-  #if there is an error in estimating a model, then error.mes==TRUE
-  #and don't calculate statistics
-  for(i in 1:nsub){
-    #check if the submodels and the saturated submodels are
-    #of the same class, and stop if not.
-    stopifnot(class(submodels[[i]])==
-                class(saturated.submodels[[i]]))
-    if(all(class(submodels[[i]])=="lm")){
-      error.mes1[i]<-error.mes2[i]<-FALSE
-    }
-    else{
-      error.mes1[i]<-!submodels[[i]]$converged & submodels[[i]]$boundary
-      error.mes2[i]<-!saturated.submodels[[i]]$converged & saturated.submodels[[i]]$boundary
-    }}
-  out<-data.frame(submodel=1:nsub,logLikelihoods=rep(NA,nsub),
-                  k=rep(NA,nsub),AICs=rep(NA,nsub),n.free.parameters=
-                    rep(NA,nsub))
-  out.saturated<-data.frame(submodel=1:nsub,logLikelihoods=rep(NA,nsub),
-                            k=rep(NA,nsub),AICs=rep(NA,nsub),
-                            n.free.parameters=rep(NA,nsub))
-  
-  #get likelihoods, AIC & k and store in "out"
-  for(i in 1:nsub){
-    out$logLikelihoods[i]<-logLik(submodels[[i]])
-    out$AICs[i]<-AIC(submodels[[i]])
-    out$k[i]<-nobs-df.residual(submodels[[i]])
-    out$n.free.parameters[i]<-attributes(logLik(submodels[[i]]))$df
-    out.saturated$n.free.parameters[i]<-attributes(logLik(saturated.submodels[[i]]))$df
-        out.saturated$logLikelihoods[i]<-logLik(saturated.submodels[[i]])
-    out.saturated$AICs[i]<-AIC(saturated.submodels[[i]])
-    out.saturated$k[i]<-nobs-df.residual(saturated.submodels[[i]])
-  }
-  #Overall k, AIC and likelihood for models:
-  model.AIC<-sum(out$AIC)
-  model.LL<-sum(out$logLikelihoods)
-#model df is the difference in the # of free parameters in the
-#less constrained model relative to the # of free parameters in the
-# more constrained (nested) model
-  model.df<-sum(out.saturated$n.free.parameters)-
-    sum(out$n.free.parameters)
-  n.free.parameters<-sum(out$n.free.parameters)
-  n.saturated.free.parameters<-sum(out.saturated$n.free.parameters)
-  saturated.model.AIC<-sum(out.saturated$AIC)
-  saturated.model.LL<-sum(out.saturated$logLikelihoods)
-  saturated.model.df<-sum(out.saturated$k)
-# the MLX2 statistic is the difference in likelihoods between the
-#more constrained (nested) model and the less constrained model;
-#usually the saturated model
-  X2<--2*(model.LL-saturated.model.LL)
-  if(X2<0)X2<-NA
-#  df<-saturated.model.df-model.df
-  null.prob<-NA
-#Only calculate null prob if the X2 is valid with valid df
-  if(!is.na(X2)&(model.df>0))null.prob<-1-pchisq(X2,model.df)
-  #check if any models had errors in estimation
-  error.flag<-sum(error.mes1)+sum(error.mes2)
-  list(model.X2=X2,model.df=model.df,null.prob=null.prob,
-       model.loglikelihood=model.LL,
-       n.free.parameters=n.free.parameters,
-       n.free.parameters.saturated=n.saturated.free.parameters,
-       saturated.model.loglikelihood=saturated.model.LL,
-       model.AIC=model.AIC,submodels=submodels,error.flag=error.flag)
-}
-```
 #Function for calculating effective sample size from Moran's I and actual sample size
 ```{r effective-sample-size}
 N.eff<-function(I,N){ #input values: Moran's I estimate, variable sample size
@@ -421,9 +347,10 @@ for (j in 1:length(Pcoef_names)) {
 }
 ```
 
+
 #SPARTINA submodel
 ```{r data-read-in}
-#file name is data specific
+#this load method is relative to the working directory - adjust your files as needed
 preCNNdata<-read.csv("2014_plants_snail_xy_data.csv")
   preCNNdata<-na.omit(preCNNdata)
 ```
@@ -537,8 +464,9 @@ P.spart.Moran<-moran.test(P.resid,nb2listw(Pxy.nb,style ="W"))
 ```
 #calculate effective sample size and modify model standard errors and p values
 ```{r}
-PAspartNeff<-as.numeric(N.eff(PA.spart.Moran$estimate[1],length(spart.hab[,1]))) #calculate n' for each model
+PAspartNeff<-as.numeric(N.eff(PA.spart.Moran$estimate[1],length(spart.hab[,1]))) #calculate n' for each model using function written above
 PspartNeff<-as.numeric(N.eff(P.spart.Moran$estimate[1],length(spart.habY[,1])))
+#n' values added to column 3 & 4 of Table 2
 
 mod.adjuster(spartPAmod1,PAspartNeff) #look at adjusted parameters for both models
 mod.adjuster(spartPmod1,PspartNeff)
@@ -566,51 +494,6 @@ spartR2adj<-summary(spartFmod)$adj.r.squared
 ```
 #calculate R2 and standardize coefficients
 ```{r}
-spart_coef<-range.std.coef(spartPAmod1,spartPmod1,CNNdata)
+spart_coef<-range.std.coef(spartPAmod1,spartPmod1,CNNdata) #calculate final range standardized coefficients
+print(spart_coef)
 ```
-
-#load functions
-```{r plot-residuals}
-# FUNCTION TO CREATE AND PRINT SERIES OF PLOTS
-Plot1vsMany <- function(y.var,set.x) {
-  xy = cbind(y.var, set.x)
-  N=dim(set.x)
-  n=N[2] +1
-  for(i in 2:n){
-    j=i-1
-    dev.new(height=6,width=6)
-    plot(xy[,1] ~ xy[,i],
-         pch=16,
-         xlab=names(set.x[j]),
-         ylab=names(y.var));
-    abline(lm(xy[,1] ~ xy[,i]))
-  }
-}
-```
-```{r examine-correlations}
-# FUNCTION TO CREATE AND PRINT VECTOR OF CORRELATIONS
-Cor1vsMany <- function(y.var,set.x) {
-  N=dim(set.x)
-  n=N[2]
-  cor.out=vector(length=n)
-  for(i in 1:n){ 
-    cor.out[i]=cor(y.var, set.x[i], use="pairwise.complete.obs")
-  }
-  names(cor.out)= names(set.x)
-  outfile=data.frame(cor.out)
-  print(outfile,digits=2)
-}
-```
-#create exogenous and predictive variable dataframe
-```{r}
-#we have a problem here, the merge df do not match in terms of obs indexing...
-SpartResid<-spart.merge$logSpart - spart.merge$spartPRED
-SarcResid<-sarc.merge$logSarc - sarc.merge$sarcPRED
-BatisResid<-batis.merge$logBatis - batis.merge$batisPRED
-BorrResid<-borr.merge$logBorr - borr.merge$borrPRED
-LimoResid<-limo.merge$logLimon - limo.merge$limoPRED
-JuncResid<-junc.merge$logjunc - junc.merge$juncPRED
-
-residuals_exam_df<-data.frame()
-```
-

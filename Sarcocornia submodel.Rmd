@@ -1,5 +1,5 @@
 ---
-title: "Untitled"
+title: "SARCOCORNIA SUBMODEL"
 output: html_document
 ---
 
@@ -7,86 +7,11 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-#Functions needed to run:
-```{r fullmodel-fit-indices}
-MLX2<-function(submodels,saturated.submodels,data){
-  #submodels is a list containing the submodels in your model
-  # in the form of linear, generalized linear, generalized additive
-  # mixed models, or any other model object that has AIC and
-  #log-likelihood attributes.
-  #saturated.submodels is a list containing the submodels of your
-  # model that defines the saturated submodels (or otherwise)
-  #into which your model is properly nested.
-  #data is the data set
-  #
-  #number of submodels in full model
-  nobs<-dim(data)[1]
-  nsub<-length(submodels)
-  error.mes1<-error.mes2<-rep(FALSE,nsub)
-  #if there is an error in estimating a model, then error.mes==TRUE
-  #and don't calculate statistics
-  for(i in 1:nsub){
-    #check if the submodels and the saturated submodels are
-    #of the same class, and stop if not.
-    stopifnot(class(submodels[[i]])==
-                class(saturated.submodels[[i]]))
-    if(all(class(submodels[[i]])=="lm")){
-      error.mes1[i]<-error.mes2[i]<-FALSE
-    }
-    else{
-      error.mes1[i]<-!submodels[[i]]$converged & submodels[[i]]$boundary
-      error.mes2[i]<-!saturated.submodels[[i]]$converged & saturated.submodels[[i]]$boundary
-    }}
-  out<-data.frame(submodel=1:nsub,logLikelihoods=rep(NA,nsub),
-                  k=rep(NA,nsub),AICs=rep(NA,nsub),n.free.parameters=
-                    rep(NA,nsub))
-  out.saturated<-data.frame(submodel=1:nsub,logLikelihoods=rep(NA,nsub),
-                            k=rep(NA,nsub),AICs=rep(NA,nsub),
-                            n.free.parameters=rep(NA,nsub))
-  
-  #get likelihoods, AIC & k and store in "out"
-  for(i in 1:nsub){
-    out$logLikelihoods[i]<-logLik(submodels[[i]])
-    out$AICs[i]<-AIC(submodels[[i]])
-    out$k[i]<-nobs-df.residual(submodels[[i]])
-    out$n.free.parameters[i]<-attributes(logLik(submodels[[i]]))$df
-    out.saturated$n.free.parameters[i]<-attributes(logLik(saturated.submodels[[i]]))$df
-        out.saturated$logLikelihoods[i]<-logLik(saturated.submodels[[i]])
-    out.saturated$AICs[i]<-AIC(saturated.submodels[[i]])
-    out.saturated$k[i]<-nobs-df.residual(saturated.submodels[[i]])
-  }
-  #Overall k, AIC and likelihood for models:
-  model.AIC<-sum(out$AIC)
-  model.LL<-sum(out$logLikelihoods)
-#model df is the difference in the # of free parameters in the
-#less constrained model relative to the # of free parameters in the
-# more constrained (nested) model
-  model.df<-sum(out.saturated$n.free.parameters)-
-    sum(out$n.free.parameters)
-  n.free.parameters<-sum(out$n.free.parameters)
-  n.saturated.free.parameters<-sum(out.saturated$n.free.parameters)
-  saturated.model.AIC<-sum(out.saturated$AIC)
-  saturated.model.LL<-sum(out.saturated$logLikelihoods)
-  saturated.model.df<-sum(out.saturated$k)
-# the MLX2 statistic is the difference in likelihoods between the
-#more constrained (nested) model and the less constrained model;
-#usually the saturated model
-  X2<--2*(model.LL-saturated.model.LL)
-  if(X2<0)X2<-NA
-#  df<-saturated.model.df-model.df
-  null.prob<-NA
-#Only calculate null prob if the X2 is valid with valid df
-  if(!is.na(X2)&(model.df>0))null.prob<-1-pchisq(X2,model.df)
-  #check if any models had errors in estimation
-  error.flag<-sum(error.mes1)+sum(error.mes2)
-  list(model.X2=X2,model.df=model.df,null.prob=null.prob,
-       model.loglikelihood=model.LL,
-       n.free.parameters=n.free.parameters,
-       n.free.parameters.saturated=n.saturated.free.parameters,
-       saturated.model.loglikelihood=saturated.model.LL,
-       model.AIC=model.AIC,submodels=submodels,error.flag=error.flag)
-}
-```
+#TITLE: Sarcocornia submodel script
+#AUTHOR: Jacob Simon
+#CONTACT: jts30437@uga.edu
+#LAST UPDATED: 02/02/2022
+
 #Function for calculating effective sample size from Moran's I and actual sample size
 ```{r effective-sample-size}
 N.eff<-function(I,N){ #input values: Moran's I estimate, variable sample size
@@ -478,7 +403,7 @@ print(juncSTD)
 
 #SARCOCORNIA submodel
 ```{r data-read-in}
-#file name is data specific
+#this load method is relative to the working directory - adjust your files as needed
 preCNNdata<-read.csv("2014_plants_snail_xy_data.csv")
   preCNNdata<-na.omit(preCNNdata)
 ```
@@ -580,9 +505,9 @@ P.sarc.Moran<-moran.test(P.resid,nb2listw(Pxy.nb,style ="W"))
 
 #compute adjusted sample size, standard errors and p values
 ```{r}
-PAsarcNeff<-as.numeric(N.eff(PA.sarc.Moran$estimate[1],length(sarc.hab[,1]))) #calculate n' for each model
+PAsarcNeff<-as.numeric(N.eff(PA.sarc.Moran$estimate[1],length(sarc.hab[,1]))) #calculate n' for each model using function written above
 PsarcNeff<-as.numeric(N.eff(P.sarc.Moran$estimate[1],length(sarc.habY[,1])))
-
+#n' values added to column 3 & 4 of Table 2
 
 mod.adjuster(sarcPAmod1,PAsarcNeff) #adjust each model and print values
 mod.adjuster(sarcPmod1,PsarcNeff)
@@ -637,60 +562,6 @@ sarcR2adj<-summary(sarcFmod)$adj.r.squared
 ```
 # standardize the final model coefficients
 ```{r}
-sarc_coef<-range.std.coef(sarcPAmod1,sarcPmod1,CNNdata)
+sarc_coef<-range.std.coef(sarcPAmod1,sarcPmod1,CNNdata)#calculate final range standardized coefficients
+print(sarc_coef)
 ```
-#consolidate necessary info for graph
-
-#check the fuctions performance on models with different variables
-```{r}
-elev<-mean(CNNdata$elevation..m.)
-Bor<-mean(CNNdata$Bor)
-Junc<-mean(CNNdata$Juncus)
-
-maxElev<-max(CNNdata$elevation..m.)
-maxBor<-max(CNNdata$Bor)
-maxJunc<-max(CNNdata$Juncus)
-
-minElev<-min(CNNdata$elevation..m.)
-minBor<-min(CNNdata$Bor)
-minJunc<-min(CNNdata$Juncus)
-
-PAcoef<-sarcPAmod1$coefficients
-Pcoef<-sarcPmod1$coefficients
-
-
-maxElev<-(1/(1+1/(exp(PAcoef[1] + PAcoef[2]*maxElev + PAcoef[4]*Bor + PAcoef[3]*Junc))))*(Pcoef[1] + Pcoef[2]*maxElev + Pcoef[3]*Junc + Pcoef[4]*Bor)
-print(paste("max Elev toggle:",maxElev))
-
-maxBor<-(1/(1+1/(exp(PAcoef[1] + PAcoef[2]*elev + PAcoef[4]*maxBor + PAcoef[3]*Junc))))*(Pcoef[1] + Pcoef[2]*elev + Pcoef[3]*Junc + Pcoef[4]*maxBor)
-print(paste("max Sal toggle:",maxBor))
-
-maxJunc<-(1/(1+1/(exp(PAcoef[1] + PAcoef[2]*elev + PAcoef[3]*maxJunc + PAcoef[4]*Bor))))*(Pcoef[1] + Pcoef[2]*elev + Pcoef[3]*maxJunc + Pcoef[4]*Bor)
-print(paste("max Junc toggle:",maxJunc))
-
-
-minElev<-(1/(1+1/(exp(PAcoef[1] + PAcoef[2]*minElev + PAcoef[4]*Bor + PAcoef[3]*Junc))))*(Pcoef[1] + Pcoef[2]*minElev + Pcoef[3]*Junc + Pcoef[4]*Bor)
-print(paste("min Elev toggle:",minElev))
-
-minBor<-(1/(1+1/(exp(PAcoef[1] + PAcoef[2]*elev + PAcoef[4]*minBor + PAcoef[3]*Junc))))*(Pcoef[1] + Pcoef[2]*elev + Pcoef[3]*Junc + Pcoef[4]*minBor)
-print(paste("min Sal toggle:",minBor))
-
-minJunc<-(1/(1+1/(exp(PAcoef[1] + PAcoef[2]*elev + PAcoef[4]*Bor + PAcoef[3]*minJunc))))*(Pcoef[1] + Pcoef[2]*elev + Pcoef[3]*minJunc + Pcoef[4]*Bor)
-print(paste("min Junc toggle",minJunc))
-
-diffElev<-maxElev - minElev
-diffSal<-maxBor - minBor
-diffJunc<-maxJunc - minJunc
-
-rangeSarc<-range(CNNdata$logSarc)
-  rangeSarc<-rangeSarc[2] - rangeSarc[1]
-
-stdElev<-diffElev/rangeBorr
-stdSal<-diffSal/rangeBorr
-stdJunc<-diffJunc/rangeBorr
-
-print(paste("Standardized Elevation:", stdElev))
-print(paste("Standardized Salinity:", stdSal))
-print(paste("Standardized Juncus:",stdJunc))
-```
-
