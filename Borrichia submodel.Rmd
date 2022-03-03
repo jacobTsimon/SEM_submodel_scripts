@@ -10,12 +10,27 @@ knitr::opts_chunk$set(echo = TRUE)
 #TITLE: Borrichia submodel script
 #AUTHOR: Jacob Simon
 #CONTACT: jts30437@uga.edu
-#LAST UPDATED: 02/02/2022
+#LAST UPDATED: 03/03/2022
 
 #Functions needed to run:
+
+#Function for calculating effective sample size from Moran's I and actual sample size
+```{r effective-sample-size}
+#Function for calculation of the effective sample size (aka n') reduced by spatial autocorrelation (as estimated by Moran's I), see text for further details
+
+N.eff<-function(I,N){ #input values: I: Moran's I estimate
+                                    #N: variable sample size
+  
+  result<-N*(1-I)/(1+I) #calculate n' using Cressie 2015's equation
+  return(result)
+}
+```
 #Function for calculating adjusted model parameters
 ```{r model-adjuster}
-mod.adjuster<-function(mod,N.eff){ #input values: model object to be adjusted, n' value
+#Function for adjusting model object standard errors and p values to reflect the severity of spatial autocorrelation, as estimated by the change in effective sample size
+
+mod.adjuster<-function(mod,N.eff){ #input values: mod: model object to be adjusted
+                                                  #N.eff: n' value (effective sample size calculated using N.eff) 
   std.errors<-coef(summary(mod))[,2]
   estimates<-coef(summary(mod))[,1] #store standard errors and coefficient estimates of model
   
@@ -32,215 +47,236 @@ mod.adjuster<-function(mod,N.eff){ #input values: model object to be adjusted, n
 ```
 #Function for revising the dataframe to reflect spot-checked photos
 ```{r df-reviser}
-df.reviser<-function(file,df,colnum = NA){  #function for revising datasets to reflect spot checked values
+#function for revising datasets to reflect spot checked values
+#This function works in concert with the SpeciesCheck.txt files, which contain the values of the checked bottom 5th percentile of each species
+
+df.reviser<-function(file,df,colnum = NA){  #file: specify the SpeciesCheck.txt file to use
+                                            #df: the dataframe to be revised
+                                            #colnum: the column number of the species in question within the specified dataframe
   
-bot.rev<-read.delim(file = file)
-int.mod<-df
+bot.rev<-read.delim(file = file) #read in specified file 
+int.mod<-df #establish object for specified dataframe
 
-print(paste("Number of false positives found:",sum(bot.rev[,3] == 0)))
+print(paste("Number of false positives found:",sum(bot.rev[,3] == 0))) #print number of false positives identified to console
 
-if(is.na(colnum) == FALSE){
+if(is.na(colnum) == FALSE){  #print number of original positives in dataframe to consoles
   print(paste("Number of positives in original dataframe:",sum(as.numeric(df[,colnum] > 0))))
 }
 
-for (i in 1:length(bot.rev[,1])) {
+for (i in 1:length(bot.rev[,1])) { #loop through the review file
   response<-bot.rev[i,3]
   
-  if (response != 0 & response != 1){
+  if (response != 0 & response != 1){ #the response values should be binary (presence/absence within a photo) so if it isn't one of those values something is wrong
     print("mistakes were made")
     print(response)
     print(bot.rev[i,])
   }
 
-  if (response == 0){
-    row<-bot.rev[i,1]
-    DSC<-bot.rev[i,2]
+  if (response == 0){ #for each observation where the assessment is absent (0)
+    row<-bot.rev[i,1] #grab the row
+    DSC<-bot.rev[i,2] #grab the DSC identifier
     
     
-    for (j in 1:length(df[,1])) {
-      ref.row<-df$Row
-        ref.row<-ref.row[j]
-      ref.DSC<-df$Image_Id
-        ref.DSC<-ref.DSC[j]
-      if (row == ref.row & DSC == ref.DSC){
-        int.mod[j,colnum]<-response
+    for (j in 1:length(df[,1])) { #loop through the dataframe
+      ref.row<-df$Row #pull out Row column from dataframe (structure specific to our data file)
+        ref.row<-ref.row[j] #grab iteration of row value
+      ref.DSC<-df$Image_Id #pull out the Image_ID column (structure specific to data file)
+        ref.DSC<-ref.DSC[j] #grab iteration of DSC value
+      if (row == ref.row & DSC == ref.DSC){ #If both the Row number and DSC ID match
+        int.mod[j,colnum]<-response #replace the value originally reported as 0 
       }
     }
   }
 }
-print(paste("Adjusted number of observations:", sum(as.numeric(int.mod[,colnum] > 0))))
-  return(int.mod)
+print(paste("Adjusted number of observations:", sum(as.numeric(int.mod[,colnum] > 0)))) #print revised number of observations to console
+  return(int.mod) #return the revised dataframe
 }
 ```
 #Function for range adjusted coefficient calculation
 ```{r coef-stdizer}
-range.std.coef<-function(PAmod,Pmod,data){ #takes presence/absence and abundance models for input, and the dataframe used for modelling
-  PAcoef_names<-names(PAmod$coefficients)
-    PAcoef_names<-PAcoef_names[-1]  #remove the intercept
-  df_names<-names(data)
+#This function is used to calculate range standardized coefficients from hurdle models, as described by Grace and Bollen (2005) in their paper "Interpreting the results from multiple regression and structural equations models" and as implemented in Schweiger et al 2016. See Statistical Appendices for discussion on why this approach was used. 
+
+range.std.coef<-function(PAmod,Pmod,data){ #takes presence/absence and abundance models(PAmod/Pmod args respectively), and the dataframe used for modelling (data arg) for input
   
-  PA_vars_stats<-matrix(ncol = length(PAcoef_names),nrow = 3)
+  PAcoef_names<-names(PAmod$coefficients) #grab a list of the presence/absence coefficient names
+    PAcoef_names<-PAcoef_names[-1]  #remove the intercept
+  df_names<-names(data) #grab a list of the variables in inputted dataframe
+  
+  PA_vars_stats<-matrix(ncol = length(PAcoef_names),nrow = 3) #create a matrix to store minimum/maximum/mean values for each variable
   n<-0
-for (h in 1:length(PAcoef_names)) {
+for (h in 1:length(PAcoef_names)) { # loop over the two name lists
   for (i in 1:length(df_names)) {
-    if(df_names[i] == PAcoef_names[h]){
+    if(df_names[i] == PAcoef_names[h]){ #for each column that matches a predictor name;
       n<-n + 1
 
-      PA_vars_stats[1,n]<-mean(data[,i])  #stores the mean value of each predictor variable
-      PA_vars_stats[2,n]<-min(data[,i])   #stores the min value
-      PA_vars_stats[3,n]<-max(data[,i])   #stores the max value
+      PA_vars_stats[1,n]<-mean(data[,i])  #stores the mean value of each predictor variable in row 1
+      PA_vars_stats[2,n]<-min(data[,i])   #stores the min value in row 2
+      PA_vars_stats[3,n]<-max(data[,i])   #stores the max value in row 3
       break
     }
   }
 }
+  #now we do the same with the abundance model (Pmod). This is necessary to ensure functioning when one model has a different set of predictors than the other
   
-  Pcoef_names<-names(Pmod$coefficients)
+  Pcoef_names<-names(Pmod$coefficients) #grab a list of the predictor coefficients
     Pcoef_names<-Pcoef_names[-1]  #remove the intercept
-  df_names<-names(data)
   
-  P_vars_stats<-matrix(ncol = length(Pcoef_names),nrow = 3)
+  P_vars_stats<-matrix(ncol = length(Pcoef_names),nrow = 3) #create a matrix for storing max/min/mean values for abundance model
   
   m<-0
-for (j in 1:length(Pcoef_names)) {
+for (j in 1:length(Pcoef_names)) { #loop over both sets of names
   for (k in 1:length(df_names)) {
-    if(df_names[k] == Pcoef_names[j]){
+    if(df_names[k] == Pcoef_names[j]){ #when coefficient matches data column;
       m<-m + 1
       
-      P_vars_stats[1,m]<-mean(data[,k])  #stores the mean value of each predictor variable
-      P_vars_stats[2,m]<-min(data[,k])   #stores the min value
-      P_vars_stats[3,m]<-max(data[,k])   #stores the max value
+      P_vars_stats[1,m]<-mean(data[,k])  #stores the mean value of each predictor variable in row 1
+      P_vars_stats[2,m]<-min(data[,k])   #stores the min value in row 2
+      P_vars_stats[3,m]<-max(data[,k])   #stores the max value in row 3
       break
     }
   }
 } 
   #find the range of the dependent variable in the models
-  dep_var_name<-names(Pmod$model)[1] #use presence since PA is a binary dependent var
-  for (b in 1:length(df_names)) {
-    if(df_names[b] == dep_var_name){
+  dep_var_name<-names(Pmod$model)[1] #use presence since PA is a binary dependent variable
+  for (b in 1:length(df_names)) { #loop over dataframe names
+    if(df_names[b] == dep_var_name){ #once we've found the dep var;
       dep_var<-data[,b]
       
-      var_range_vals<-range(data[,b])
-      var_range<-var_range_vals[2] - var_range_vals[1]
+      var_range_vals<-range(data[,b]) #take the range() of the data which provides max/min
+      var_range<-var_range_vals[2] - var_range_vals[1] #subtract min from max
       break
     }
   }  
   
 #calculate max and min values for each predictor in the presence/absence model  
-  PAcoef<-PAmod$coefficients
-  PAmod_mean_vals<-c()
+  PAcoef<-PAmod$coefficients #pull out numerical coefficient values of PA mod
+  PAmod_mean_vals<-c() #make lists for calculated mean/max/min vals
   PAmod_max_vals<-c()
   PAmod_min_vals<-c()
   
-  for (z in 1:length(PAcoef_names)) {
-    PAmod_mean_vals[z]<-PAcoef[z+1] * PA_vars_stats[1,z]
-    PAmod_min_vals[z]<-PAcoef[z+1] * PA_vars_stats[2,z]
-    PAmod_max_vals[z]<-PAcoef[z+1] * PA_vars_stats[3,z]
+  for (z in 1:length(PAcoef_names)) { #loop over the number of coefficients (minus the intercept)
+    PAmod_mean_vals[z]<-PAcoef[z+1] * PA_vars_stats[1,z] #multiply the zth coefficient by its mean
+    PAmod_min_vals[z]<-PAcoef[z+1] * PA_vars_stats[2,z] #min
+    PAmod_max_vals[z]<-PAcoef[z+1] * PA_vars_stats[3,z] #max 
   }
 #calculate max and min values for each predictor in the abundance model
-  Pcoef<-Pmod$coefficients
+  Pcoef<-Pmod$coefficients #same as above but for abundance (Pmod), necessary in case of different       predictors
   Pmod_mean_vals<-c()
   Pmod_max_vals<-c()
   Pmod_min_vals<-c()
   for (z in 1:length(Pcoef_names)) {
-    Pmod_mean_vals[z]<-Pcoef[z+1] * P_vars_stats[1,z]
-    Pmod_min_vals[z]<-Pcoef[z+1] * P_vars_stats[2,z]
-    Pmod_max_vals[z]<-Pcoef[z+1] * P_vars_stats[3,z]
+    Pmod_mean_vals[z]<-Pcoef[z+1] * P_vars_stats[1,z] #mean
+    Pmod_min_vals[z]<-Pcoef[z+1] * P_vars_stats[2,z] #min
+    Pmod_max_vals[z]<-Pcoef[z+1] * P_vars_stats[3,z] #max
   }
   
-##In the case of a model with differing sets of coefficients, different procedure is needed
+##With these values in hand, we can begin to calculate the range standardized coefficients for each model
+  #WARNING: the section that follows (calculating in case of models w/ differing sets of coefficients) is quite dense, if you are     reading this for comprehension, it is advisable to start with the following section (line 334)
+  
+##In the case of a model with differing sets of coefficients, special procedure is needed
  if ( length(Pcoef_names) != length(PAcoef_names)){ #test for difference
   
-  if(length(PAcoef_names) > length(Pcoef_names)){#establish which model is longer
-    long_list<-PAcoef_names
-    id<-'PA'   #marker for later use
+  if(length(PAcoef_names) > length(Pcoef_names)){#in case of different length, establish which model is longer
+    long_list<-PAcoef_names #corresponding coefficient name lists for when presence/absence is the longer mod
+    short_list<-Pcoef_names 
+    id<-'PA'   #markers for later use
     alt.id<-'P'
-    short_list<-Pcoef_names
   }
-  else{
+  else{ #if presence/absence mod is shorter, establish these variables & markers
       long_list<-Pcoef_names
       short_list<-PAcoef_names
       id<-'P'
       alt.id<-'PA'
     }
   
-  dupes<-match(x = long_list,short_list)  #find the positions of matching coefficients 
-  dupeShort<-match(short_list,long_list)     
+  dupes<-match(x = long_list,short_list)  #find the positions of duplicate coefficients, if any
+  dupeShort<-match(short_list,long_list)  #matching both ways necessary because of possible ordering complications   
   
   
-  #vectors to store calculated values
-  max.toggle<-c()
+  #vectors to store calculated values for the longer model
+  max.toggle<-c() 
   min.toggle<-c()
   diff.vec<-c()
-  for (j in 1:length(dupes)) { #loop through the longer model
-    if(is.na(dupes[j]) != TRUE){ #when this statement is TRUE, coef present in both models
-      d<-dupes[j]
+  for (j in 1:length(dupes)) { #loop through the longer model (match() vector is same length as name vector)
+    d<-dupes[j]
+    if(is.na(d) != TRUE){ #when this statement is TRUE, coefficient is present in both models
+      
       if(id == 'PA'){ #a TRUE here indicates the presence/absence model is longer
+        #calculate max toggle for variable j in PAmod list and d in Pmod list, and transform PA values from logit to proportions
         PAmax_toggle<-1/(1+1/(exp(PAcoef[1] + PAmod_max_vals[j] + sum(PAmod_mean_vals[-j]))))
         Pmax_toggle<-Pcoef[1] + Pmod_max_vals[d] + sum(Pmod_mean_vals[-d])
         
+        #calculate min toggles, carrying out the transform for logistic regression again
         PAmin_toggle<-1/(1+1/(exp(PAcoef[1] + PAmod_min_vals[j] + sum(PAmod_mean_vals[-j]))))
         Pmin_toggle<-Pcoef[1] + Pmod_min_vals[d] + sum(Pmod_mean_vals[-d])
+      
         
-        max.toggle[j]<-PAmax_toggle*Pmax_toggle
+        max.toggle[j]<-PAmax_toggle*Pmax_toggle #store the product in the respective vector
         min.toggle[j]<-PAmin_toggle*Pmin_toggle
-        diff.vec[j]<-max.toggle[j] - min.toggle[j]
+        diff.vec[j]<-max.toggle[j] - min.toggle[j] #take the difference between products
       }
       else{ #indicates that presence model is longer, so reverse the indexes
+        #calculate the max toggle for variable j in Pmod list and d in PAmod list, transform PAmod 
         Pmax_toggle<-Pcoef[1] + Pmod_max_vals[j] + sum(Pmod_mean_vals[-j])
         PAmax_toggle<-1/(1+1/(exp(PAcoef[1] + PAmod_max_vals[d] + sum(PAmod_mean_vals[-d]))))
         
+        #calculate min toggles, transform
         Pmin_toggle<-Pcoef[1] + Pmod_min_vals[j] + sum(Pmod_mean_vals[-j])
         PAmin_toggle<-1/(1+1/(exp(PAcoef[1] + PAmod_min_vals[d] + sum(PAmod_mean_vals[-d]))))
         
-        max.toggle[j]<-PAmax_toggle*Pmax_toggle
+        max.toggle[j]<-PAmax_toggle*Pmax_toggle #store product in respective vector
         min.toggle[j]<-PAmin_toggle*Pmin_toggle
-        diff.vec[j]<-max.toggle[j] - min.toggle[j]
+        diff.vec[j]<-max.toggle[j] - min.toggle[j] #take the difference between products
       }
     }
-  else{ #indicates that the coef is unique to the long model
-    if(id == 'PA'){ #longer mod is PA
+  else{ #indicates that the coefficient is unique to the long model
+    if(id == 'PA'){ #indicates the longer mod is PA
+        #same procedures as above, but with shorter model assumed to lack the unique variable 
         PAmax_toggle<-1/(1+1/(exp(PAcoef[1] + PAmod_max_vals[j] + sum(PAmod_mean_vals[-j]))))
-        Pmax_toggle<-Pcoef[1] + sum(Pmod_mean_vals) #no longer need to worry about max
+        Pmax_toggle<-Pcoef[1] + sum(Pmod_mean_vals) #no longer need to worry about max for Pmod
         
         PAmin_toggle<-1/(1+1/(exp(PAcoef[1] + PAmod_min_vals[j] + sum(PAmod_mean_vals[-j]))))
-        Pmin_toggle<-Pcoef[1] + sum(Pmod_mean_vals) # or mins
+        Pmin_toggle<-Pcoef[1] + sum(Pmod_mean_vals) # or mins for Pmod
         
-        max.toggle[j]<-PAmax_toggle*Pmax_toggle
+        max.toggle[j]<-PAmax_toggle*Pmax_toggle #store values in respective vectors
         min.toggle[j]<-PAmin_toggle*Pmin_toggle
         diff.vec[j]<-max.toggle[j] - min.toggle[j]
       }
-      else{ #the longer model is presence
+      else{ #the longer model is Pmod
+        #repeat procedure as above but with Pmod as longer model
         Pmax_toggle<-Pcoef[1] + Pmod_max_vals[j] + sum(Pmod_mean_vals[-j])
         PAmax_toggle<-1/(1+1/(exp(PAcoef[1] + sum(PAmod_mean_vals))))
         
         Pmin_toggle<-Pcoef[1] + Pmod_min_vals[j] + sum(Pmod_mean_vals[-j])
         PAmin_toggle<-1/(1+1/(exp(PAcoef[1] + sum(PAmod_mean_vals))))
         
-        max.toggle[j]<-PAmax_toggle*Pmax_toggle
+        max.toggle[j]<-PAmax_toggle*Pmax_toggle #store values
         min.toggle[j]<-PAmin_toggle*Pmin_toggle
         diff.vec[j]<-max.toggle[j] - min.toggle[j]
       }
   }  
   }
-  #separate vectors for the short model coef
-  max.toggleS<-c()
+  #separate vectors for the short model coefficients
+  max.toggleS<-c() #note the 'S' at the end, distinguishes from previous vectors
   min.toggleS<-c()
   diff.vecS<-c()
   for (j in 1:length(dupeShort)) { #this one loops through the shorter length mod
     if(is.na(dupeShort[j]) != TRUE){#TRUE here indicates coefficient is present in both mods
       d<-dupeShort[j]
-      if(id != 'PA'){ #PA is shorter (switched the logic, kept indexing the same)
+      if(id != 'PA'){ #TRUE here indicates that PA is shorter (switched the logic, kept indexing the same)
+        #calculate max/min/diff as performed previously
         PAmax_toggle<-1/(1+1/(exp(PAcoef[1] + PAmod_max_vals[j] + sum(PAmod_mean_vals[-j]))))
         Pmax_toggle<-Pcoef[1] + Pmod_max_vals[d] + sum(Pmod_mean_vals[-d])
         
         PAmin_toggle<-1/(1+1/(exp(PAcoef[1] + PAmod_min_vals[j] + sum(PAmod_mean_vals[-j]))))
         Pmin_toggle<-Pcoef[1] + Pmod_min_vals[d] + sum(Pmod_mean_vals[-d])
         
-        max.toggleS[j]<-PAmax_toggle*Pmax_toggle
+        max.toggleS[j]<-PAmax_toggle*Pmax_toggle #store values in respective vectors
         min.toggleS[j]<-PAmin_toggle*Pmin_toggle
         diff.vecS[j]<-max.toggleS[j] - min.toggleS[j]
       }
-      else{ #P is shorter
+      else{ #TRUE here indicates that P is shorter
+        #same as above but switched
         Pmax_toggle<-Pcoef[1] + Pmod_max_vals[j] + sum(Pmod_mean_vals[-j])
         PAmax_toggle<-1/(1+1/(exp(PAcoef[1] + PAmod_max_vals[d] + sum(PAmod_mean_vals[-d]))))
         
@@ -254,6 +290,7 @@ for (j in 1:length(Pcoef_names)) {
     }
     else{ #coef is unique to the shorter model
     if(id != 'PA'){ #PA is shorter
+      #same format, but shorter model has the unique coefficient
         PAmax_toggle<-1/(1+1/(exp(PAcoef[1] + PAmod_max_vals[j] + sum(PAmod_mean_vals[-j]))))
         Pmax_toggle<-Pcoef[1] + sum(Pmod_mean_vals)
         
@@ -265,6 +302,7 @@ for (j in 1:length(Pcoef_names)) {
         diff.vecS[j]<-max.toggleS[j] - min.toggleS[j]
       }
       else{ #P is shorter
+        #same as above but reversed
         Pmax_toggle<-Pcoef[1] + Pmod_max_vals[j] + sum(Pmod_mean_vals[-j])
         PAmax_toggle<-1/(1+1/(exp(PAcoef[1] + sum(PAmod_mean_vals))))
         
@@ -277,7 +315,7 @@ for (j in 1:length(Pcoef_names)) {
         }
       }
   }  
-  #divide by the variable's range to gain a vector of standardized coefficients
+  #divide by the dependent variable's range to gain a vector of standardized coefficients
   std_long<-diff.vec/var_range
   std_short<-diff.vecS/var_range
   
@@ -290,23 +328,25 @@ for (j in 1:length(Pcoef_names)) {
     
   std_short<-data.frame(std_short,row.names = short_list)
     colnames(std_short)<-short_name
-  
-  print(paste(long_list,"long mod:",max.toggle,min.toggle))
+  #print out results
+  print(paste(long_list,"long mod:",max.toggle,min.toggle)) #print out the toggles for each mod for quality control
   print(paste(short_list,"short mod:",max.toggleS,min.toggleS))
   print(paste(long_list,"long mod:", std_long))
   print(paste(short_list, "short model:",std_short))
-  
+  #piece together a result object
   result<-list(std_long,std_short)
     names(result)<-c(long_name,short_name)
   
   return(result)
-     }
+     } #end function in case of differing model lengths
 
-  #this code can carry out the simpler case of models with the same coefficients
+##This portion of code is accomplishing the same thing as above, just for models with the same components. Start here if you are     trying to understand the underlying equations, it is less dense than the prior sections
   
+else{  #this code can carry out the simpler case of models with the same coefficients
   PAmax_toggle<-c()  #create vectors for maximum/minimum values of presence/absence model
   PAmin_toggle<-c()
   for (y in 1:length(PA_vars_stats[1,])) {
+    #calculate max/min toggles for presence/absence model
     PAmax_toggle[y]<-1/(1+1/(exp(PAcoef[1] + PAmod_max_vals[y] + sum(PAmod_mean_vals[-y]))))#need to transform from logit
     PAmin_toggle[y]<-1/(1+1/(exp(PAcoef[1] + PAmod_min_vals[y] + sum(PAmod_mean_vals[-y]))))
   }
@@ -314,24 +354,25 @@ for (j in 1:length(Pcoef_names)) {
   Pmax_toggle<-c()   #create vectors for maximum/minimum values of presence/absence model
   Pmin_toggle<-c()
   for (y in 1:length(P_vars_stats[1,])) {
+    #calculate max/min toggles for presence model
     Pmax_toggle[y]<-Pcoef[1] + Pmod_max_vals[y] + sum(Pmod_mean_vals[-y])
     Pmin_toggle[y]<-Pcoef[1] + Pmod_min_vals[y] + sum(Pmod_mean_vals[-y])
   }
-  #calculate the combined max/min toggles 
+  #calculate the combined max/min toggles to gain final model estimate (as described in equation 3 in the paper)
   max_toggle<-PAmax_toggle * Pmax_toggle
   min_toggle<-PAmin_toggle * Pmin_toggle
   
-  #calculate the full model mean, and print it alongsidde dependent variable mean
+  #calculate the full model mean, and print it alongside dependent variable mean
   full_mod_mean<-(Pcoef[1] + sum(Pmod_mean_vals)) * 1/(1+1/(exp((PAcoef[1] + sum(PAmod_mean_vals)))))
   print(paste("Model mean:",signif(full_mod_mean,digits = 5))) #calculate and report the mean
   print(paste("Dependent Var. Mean: ",mean(dep_var)))
   
   diff_vector<-max_toggle - min_toggle  #take the difference between maximum and minimum toggle
-  stdized_vector<-diff_vector/var_range #divide by variable range
+  stdized_vector<-diff_vector/var_range #divide by variable range, this produces the final standardized values
     
   
   
-    for (p in seq(length(stdized_vector))) { #print each of the standardized coefficients
+    for (p in seq(length(stdized_vector))) { #print each of the standardized coefficients along with their names
       print(paste(PAcoef_names[p],"=",signif(stdized_vector[p],digits = 5),"(Range standardized)"))
     }
   
@@ -339,6 +380,7 @@ for (j in 1:length(Pcoef_names)) {
   
   return(result)
 }
+}  
 ```
 
 #BORRICHIA submodel
@@ -364,10 +406,10 @@ saltpan<-ifelse(CNNdata$Spart==0 & CNNdata$Sarc==0 & CNNdata$Limon==0 & CNNdata$
 CNNdata$saltpanYN<-saltpan
 ```
 
-##construct Borrichia submodel
+#Establish lower elevation threshold for Borrichia
 ```{r}
 borr.thresh<-ifelse(CNNdata$Bor == 0 & CNNdata$elevation..m. < 0.67 & CNNdata$saltpanYN == 0, 1, 0)
-#there are 3 instances of Bor presence below 0.66 m elevation (need to investigate this)
+#there are 3 instances of Bor presence below 0.66 m elevation 
 
 CNNdata$borrthreshYN<-borr.thresh  #here also, 0 indicates hospitable habitat
 ```
@@ -392,7 +434,7 @@ borrStep$anova
 
 #initial model accepted on revision
 ```
-
+#Assess
 ```{r}
 #view selected model
 summary(borrPAmod1)
@@ -412,7 +454,7 @@ borrStep2$anova
 #Salinity is removed by very small AIC difference (<1 point)
 borrPmod2<-lm(logBorr~elevation..m. + Juncus,data = borr.habY)
 ```
-
+#Assess
 ```{r}
 #view selected model
 summary(borrPmod2)
@@ -478,7 +520,7 @@ mod.adjuster(borrPmod2,PborrNeff)
 #evaluate p values for increases above 0.05
 ```
 
-#Continuing as directed in the Schwieger R code, may need to amend to reflect updates
+#Merge predictive values from two models
 ```{r}
 #bind the two dataframes together, and create a cohesive prediction value column
 borr.merge<-rbind(borr.hab,borr.inhosp)
