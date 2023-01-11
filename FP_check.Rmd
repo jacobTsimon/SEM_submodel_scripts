@@ -1,0 +1,150 @@
+---
+title: "Quality check"
+output: html_document
+---
+
+#TITLE: False positive check script
+#AUTHOR: Jacob Simon
+#CONTACT: jts30437@uga.edu
+#LAST UPDATED: 01/11/2023
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#The following DSC_grabber function is a custom made method for checking photos within the lowest elevation ranges of each species. Except for Spartina, we noticed that many species showed small blips far below their expected elevation range when mapping their distribution across the site. In order to assess whether these observations were the result of classifier confusion or if the instances were valid, this function pulls the photos found at the lowest 5th percentile of each species, and allows a user to inspect them one by one. For each photo, user input is required to indicate whether the positive for that species was valid or invalid.
+
+#By the nature of this function, it is only useful with the photos in hand, which can be made available on request. In posting this script to GitHub it is my hope to give a fuller picture of the data cleaning process, and perhaps get feedback on the methodology used
+
+#load in data file
+```{r}
+CNNdata<-read.csv("~/Desktop/SEM_submodel_scripts/2014_plants_snail_xy_data.csv")
+  CNNdata<-na.omit(CNNdata) #omit any NAs
+```
+
+#Function for searching low elevation photos for false positives
+```{r}
+#lets see if i can write this to output a txt file to feed into Python
+DSC_grabber<-function(name,data,read.in = NULL ){
+  
+  df_names<-names(data)
+  
+  for (i in 1:length(df_names)) {
+    if(df_names[i] == name){
+      spec_col<- data[,i]
+      break
+    }
+  }
+  species<-subset(data,spec_col > 0)
+  thresh<-quantile(species$elevation..m.,.05)  #calculate the bottom 5 percentile of elevation values where species is present
+
+  resdf<-subset(species,elevation..m. <= thresh)
+  row.list<-resdf$Row
+  DSC.list<-resdf$Image_Id
+  DSC.files<-sapply(DSC.list, paste,".jpg",sep = "")  #creates a list of DSC file names
+  mag.list<-resdf[,i]
+  
+  setwd("~/Volumes/ED/2014")
+  
+  responses<-c()
+  n<-1
+  end.marker<-0
+  
+  if(is.null(read.in) != TRUE){
+    numb.in<-as.numeric(read.in)
+    for (s in 1:length(read.in)) {
+      if(is.na(numb.in[s]) != TRUE){
+        responses[s]<-numb.in[s]
+      }
+      else{
+        n<-s
+        break
+      }
+    }
+  }
+  
+  for (j in n:length(DSC.files)) {
+    DSC<-DSC.files[j]
+    row.num<-row.list[j]
+    marker<-j
+    total<-length(DSC.files)
+    if(row.num < 69){
+    setwd("~/Volumes/ED/2014/MI_1_68")
+    file.show(DSC,title = paste(marker,"/",total))
+    print(paste(mag.list[j],"instance of",name))
+    responses[j]<-readline(prompt = "Species present? (Y = 1, N = 0)")
+    
+    }
+    else{
+    setwd("~/Volumes/ED/2014/MI_69_80")
+    file.show(DSC,title = paste(marker,"/",total))
+    print(paste(mag.list[j],"instance of",name))
+    responses[j]<-readline(prompt = "Species present? (Y = 1, N = 0)")
+    
+    }
+    if(responses[j] == 'saveNquit'){
+      print("loop exited - progress returned")
+      end.marker<-1
+      result<-responses
+      break
+    }
+  }
+  
+  if(end.marker != 1){
+    result<-cbind(row.list,DSC.list,responses)
+  }
+  
+  save.ask<-readline(prompt = "Save as .txt file?")
+  if(save.ask == 'Y'| save.ask == 'Yes'){
+    txt.name<-readline(prompt = "Enter file name (with .txt)")
+    setwd('~/Desktop/R workshop')
+    write.table(result,file = txt.name,sep = "\t")
+  }
+  
+  return(result)
+}
+```
+
+#USE GUIDE: Once started for a species, any inspections performed are saved only in R's environment - and only saved when the prompt 'saveNquit' is entered. This allows for pausing and resuming of checks for each species. Resuming is permitted by using the 'read.in' argument - CAUTION: if the function is rerun without specifying the proper read.in, any previous annotations will be wiped.
+#Final results can be saved as a .txt file
+
+#use the above function to inspect reported Batis images at low elevations
+```{r}
+#need to be careful not to rerun, lest I lose the annotations
+#bot.Batis.review<-DSC_grabber(name = 'Batis',data = CNNdata)
+View(bot.Batis.review)
+#DONE
+```
+#use it on Juncus
+```{r}
+bot.Junc.review<-DSC_grabber(name = 'Juncus',data = CNNdata,read.in = bot.Junc.review)
+```
+#use it on Limonium
+```{r}
+#bot.Limo.review<-DSC_grabber(name = 'Limon',data = CNNdata,read.in = bot.Limo.review)
+
+View(bot.Limo.review)
+#DONE
+```
+#use it on Sarcocornia
+```{r}
+#bot.Sarc.review<-DSC_grabber(name = 'Sarc',data = CNNdata,read.in = bot.Sarc.review)
+
+View(bot.Sarc.review)
+#DONE
+```
+#use it on Borrichia
+```{r}
+#bot.Borr.review<-DSC_grabber(name = 'Bor',data = CNNdata)
+
+View(bot.Borr.review)
+#DONE
+```
+#finally, use it on Spartina
+```{r}
+#bot.Spart.review<-DSC_grabber(name = 'Spart',data = CNNdata,read.in = bot.Spart.review)
+
+View(bot.Spart.review)
+#DONE
+```
+

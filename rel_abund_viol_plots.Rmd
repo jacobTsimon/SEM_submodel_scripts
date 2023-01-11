@@ -1,0 +1,222 @@
+---
+title: "FIGURES SCRIPT"
+output: html_document
+---
+
+#TITLE: Figures script
+#AUTHOR: Jacob Simon
+#CONTACT: jts30437@uga.edu
+#LAST UPDATED: 01/09/2023
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#Read in CNN annotation data & remove NAs from spaced rows
+```{r}
+#library(vegan) ###necessary?
+
+setwd('~/Desktop/SEM_submodel_scripts/') #set working directory to the cloned repository
+
+CNNdata<-read.csv("2014_plants_snail_xy_data.csv") ###had pre here - check redundancies??
+  preCNNdata<-na.omit(CNNdata)
+```
+#load df.reviser function
+```{r df-reviser}
+#function for revising datasets to reflect spot checked values
+#This function works in concert with the SpeciesCheck.txt files, which contain the values of the manually checked bottom 5th percentile of each species
+
+df.reviser<-function(file,df,colnum = NA){  #file: specify the SpeciesCheck.txt file to use
+                                            #df: the dataframe to be revised
+                                            #colnum: the column number of the species in question within the specified dataframe
+  
+bot.rev<-read.delim(file = file) #read in specified file 
+int.mod<-df #establish object for specified dataframe
+
+print(paste("Number of false positives found:",sum(bot.rev[,3] == 0))) #print number of false positives identified to console
+
+if(is.na(colnum) == FALSE){  #print number of original positives in dataframe to consoles
+  print(paste("Number of positives in original dataframe:",sum(as.numeric(df[,colnum] > 0))))
+}
+
+for (i in 1:length(bot.rev[,1])) { #loop through the review file
+  response<-bot.rev[i,3]
+  
+  if (response != 0 & response != 1){ #the response values should be binary (presence/absence within a photo) so if it isn't one of those values something is wrong
+    print("mistakes were made")
+    print(response)
+    print(bot.rev[i,])
+  }
+
+  if (response == 0){ #for each observation where the assessment is absent (0)
+    row<-bot.rev[i,1] #grab the row
+    DSC<-bot.rev[i,2] #grab the DSC identifier
+    
+    
+    for (j in 1:length(df[,1])) { #loop through the dataframe
+      ref.row<-df$Row #pull out Row column from dataframe (structure specific to our data file)
+        ref.row<-ref.row[j] #grab iteration of row value
+      ref.DSC<-df$Image_Id #pull out the Image_ID column (structure specific to data file)
+        ref.DSC<-ref.DSC[j] #grab iteration of DSC value
+      if (row == ref.row & DSC == ref.DSC){ #If both the Row number and DSC ID match
+        int.mod[j,colnum]<-response #replace the value originally reported as 0 
+      }
+    }
+  }
+}
+print(paste("Adjusted number of observations:", sum(as.numeric(int.mod[,colnum] > 0)))) #print revised number of observations to console
+  return(int.mod) #return the revised dataframe
+}
+```
+
+
+#remove revised photos
+```{r} 
+###need to revise paths
+#These text files contain the results of the manual validity check described in the Methods section
+
+print('Batis:')
+CNNdata<-df.reviser('~/Desktop/SEM_submodel_scripts/BatisCheck.txt',preCNNdata,12)  #use column 12 for Batis (this is all dataframe dependent) ###redundancy here???
+print('Spartina:')
+CNNdata<-df.reviser('~/Desktop/SEM_submodel_scripts/SpartCheck.txt',CNNdata,9)  #use column 9 for Spartina
+print('Limonium:')
+CNNdata<-df.reviser('~/Desktop/SEM_submodel_scripts/LimoCheck.txt',CNNdata,10)  #use column 10 for Limonium
+print('Borrichia:')
+CNNdata<-df.reviser('~/Desktop/SEM_submodel_scripts/BorrCheck.txt',CNNdata,11)  #use column 11 for Borr
+print('Juncus:')
+CNNdata<-df.reviser('~/Desktop/SEM_submodel_scripts/JuncCheck.txt',CNNdata,13)  #use column 13 for Juncus
+print('Sarcocornia:')
+CNNdata<-df.reviser('~/Desktop/SEM_submodel_scripts/SarcCheck.txt',CNNdata,8)  #use column 8 for Sarcocornia
+```
+#Figure 2: plotting relative abundance by elevation
+
+#figure out how to bin by elevation (what intervals?)
+```{r}
+#establish the range of observed elevation values in our dataset
+ElRange<-range(CNNdata$elevation..m.)
+#after playing around with the number of bins, 50 seems like a good choice (not too many, gives ~1cm bins)
+
+print(paste("Elevation goes from",ElRange[1],"m to",ElRange[2],"m"))
+
+n <- 50
+binsize <- (ElRange[2]-ElRange[1])/n
+print(paste("With",n,"bins, the width of each elevation bin is",binsize,"m"))
+```
+#add bin info to dataframe
+```{r}
+#use cut function to add new column denoting which elevation bin each image is in
+labs<-seq(1,50,by=1)
+Elev.bins<-cut(CNNdata$elevation..m.,breaks = 50,labels=labs)
+CNNdata<-cbind(CNNdata,Elev.bins)
+print(CNNdata[1:5,])
+```
+
+#Seperate by bin and average each variable 
+```{r}
+
+bin.avgs<-matrix(nrow = 50, ncol = 10)
+  bin.avgs[labs,]<-0 
+  colnames(bin.avgs)<-c("Bin #","Elevation","Salinity","Spartina","Sarcocornia","Batis","Borrichia","Limonium","Juncus","Mud")
+iters<-labs*0 
+
+for (i in 1:50) { 
+  bin.avgs[i,1]<-i #fill in the bin number in the first column
+  for (j in 1:length(CNNdata[,1])) { 
+    if(i == as.numeric(CNNdata$Elev.bins[j])){
+      iters[i]<-iters[i] + 1 
+      
+      bin.avgs[i,2]<-bin.avgs[i,2] + CNNdata$elevation..m.[j]
+      bin.avgs[i,3]<-bin.avgs[i,3] + CNNdata$salinity..psu.[j]
+      bin.avgs[i,4]<-bin.avgs[i,4] + CNNdata$Spart[j]
+      bin.avgs[i,5]<-bin.avgs[i,5] + CNNdata$Sarc[j]
+      bin.avgs[i,6]<-bin.avgs[i,6] + CNNdata$Batis[j]
+      bin.avgs[i,7]<-bin.avgs[i,7] + CNNdata$Bor[j]
+      bin.avgs[i,8]<-bin.avgs[i,8] + CNNdata$Limon[j]
+      bin.avgs[i,9]<-bin.avgs[i,9] + CNNdata$Juncus[j]
+      bin.avgs[i,10]<-bin.avgs[i,10] + CNNdata$Mud[j]
+    }
+  }
+bin.avgs[i,2:10]<-bin.avgs[i,2:10]/iters[i] 
+}
+
+bin.avgs<-as.data.frame(bin.avgs)
+print(bin.avgs[1:5,])
+bin.avgs<-bin.avgs[,-1]
+print(bin.avgs[1:5,])
+```
+###THIS ONE IS THE REAL ONE
+
+#Remake the relative abundance figure
+```{r}
+labs <- seq(from=1,to=50,by=1) #create an empty matrix of the right dimensions
+iters <- labs*0 #creates a length = 50 list for keeping track of iterations per bin
+
+bin.avgs<-matrix(nrow = 50, ncol = 9)
+  bin.avgs[labs,]<-0
+  colnames(bin.avgs)<-c("Elevation","Spartina","Sarcocornia","Batis","Borrichia","Limonium","Juncus","Mud","Total_Cells")
+
+
+for (i in 1:50) { #loop over the number of bins
+  for (j in 1:length(CNNdata[,1])) { #loop over the dataframe
+    if(i == as.numeric(CNNdata$Elev.bins[j])){ #match the current bin to the image bin numbers
+      iters[i]<-iters[i] + 1 #add to the iterations for this bin
+      #create sums for each variable
+      bin.avgs[i,1]<-bin.avgs[i,1] + CNNdata$elevation..m.[j]
+      bin.avgs[i,2]<-bin.avgs[i,2] + CNNdata$Spart[j]
+      bin.avgs[i,3]<-bin.avgs[i,3] + CNNdata$Sarc[j]
+      bin.avgs[i,4]<-bin.avgs[i,4] + CNNdata$Batis[j]
+      bin.avgs[i,5]<-bin.avgs[i,5] + CNNdata$Bor[j]
+      bin.avgs[i,6]<-bin.avgs[i,6] + CNNdata$Limon[j]
+      bin.avgs[i,7]<-bin.avgs[i,7] + CNNdata$Juncus[j]
+      bin.avgs[i,8]<-bin.avgs[i,8] + CNNdata$Mud[j]
+    }
+  }
+bin.avgs[i,1]<-bin.avgs[i,1]/iters[i]  #average elevation on loop completion by dividing by number of items per bin
+bin.avgs[i,9]<-sum(bin.avgs[i,2:8])   #sum up the number of cells per species in each bin to get overall totals
+bin.avgs[i,2:8] <- bin.avgs[i,2:8]/bin.avgs[i,9]  #divide species totals by overall totals
+}
+
+bin.avgs<-as.data.frame(bin.avgs) #coerce to df
+bin.avgs[,1:8] <- round(bin.avgs[,1:8],digits = 3) #round down to 3 significant digits
+
+print(bin.avgs[45:50,]) #view sample
+```
+
+#create figure in ggplot2
+```{r}
+library(ggplot2)
+library(tidyr)
+
+bin.avgs <- bin.avgs[,-9]
+long.avgs<-pivot_longer(bin.avgs,cols = 2:8,names_to = 'Species', values_to = 'rel_abund') #create long form table for ease of fig creation
+
+#ggsave(filename = 'rel_abund_plotggR.pdf', #uncomment to save pdf
+ggplot(long.avgs,aes(Elevation,rel_abund,color = Species,shape = Species)) + theme_classic() + geom_point(size = 1) + geom_line() + ylab("Relative Abundance") + theme(axis.text = element_text(size = 8),axis.title = element_text(size = 8), legend.text = element_text(size = 6),legend.title = element_text(size = 6)) + scale_shape_manual(values = 1:7) + theme(legend.key.width = unit(0.1,"cm"))
+#,width = 3.3, height = 3.3, units = "in",dpi = 600, device = 'pdf' 
+#) #uncomment to save as pdf
+```
+
+#Figure 3: violin plots 
+```{r}
+library(ggplot2)
+library(tidyverse)
+
+relev.data<-cbind(Elevation = CNNdata[,6],CNNdata[,8:13]) # pull out elevation and species data
+colnames(relev.data) <- c("Elevation","Sarcocornia","Spartina","Limonium","Borrichia","Batis","Juncus")
+relev.data <- relev.data[,c(1,3,2,7,4,5,6)]
+
+#need to get data into proper format for violin plots
+vio_data <- pivot_longer(relev.data,cols = 2:7,names_to = "Species") #create long form table
+  vio_data <- cbind(vio_data,ifelse(vio_data$value > 0,1,0)) #collapse cell counts to presence/absence
+  vio_data <- vio_data[vio_data[,4] == 1,] #subset out only the presence data
+  vio_data$Species <- factor(vio_data$Species,levels = c("Spartina","Juncus","Sarcocornia","Batis","Limonium","Borrichia"))  #factor by species name
+
+print(vio_data[1:5,])  
+print(unique(vio_data[,4]))
+#create the figure
+#ggsave(filename = 'violin_plot_revised.pdf', #uncomment to save image
+
+ggplot(vio_data, aes(Species,Elevation,fill = Species)) + theme_classic() + geom_violin(scale = 'area',show.legend = FALSE) + scale_fill_manual(values = c("#FB61D7","#53B400","#A58AFF","#F8766D","#00C094","#C49A00")) + scale_y_continuous(name = "Elevation (m)") + theme(axis.text = element_text(size = 6)) + theme(axis.title = element_text(size = 8))
+
+#,width = 3.3,height = 3.3, units = "in",dpi = 600) #uncomment to save image
+```
+
