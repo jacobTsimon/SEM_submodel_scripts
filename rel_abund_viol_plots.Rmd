@@ -11,13 +11,14 @@ output: html_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
+#This script was written to create relative abundance and violin plot figures used in the paper (Figures 2 and 3 respectively)
+#Other figures usd in the paper were created in Matlab/Python, and while at time of writing they are not posted those scripts will be pushed to GitHub ASAP
+
 #Read in CNN annotation data & remove NAs from spaced rows
 ```{r}
-#library(vegan) ###necessary?
-
 setwd('~/Desktop/SEM_submodel_scripts/') #set working directory to the cloned repository
 
-CNNdata<-read.csv("2014_plants_snail_xy_data.csv") ###had pre here - check redundancies??
+CNNdata<-read.csv("2014_plants_snail_xy_data.csv") 
   preCNNdata<-na.omit(CNNdata)
 ```
 #load df.reviser function
@@ -71,11 +72,10 @@ print(paste("Adjusted number of observations:", sum(as.numeric(int.mod[,colnum] 
 
 #remove revised photos
 ```{r} 
-###need to revise paths
 #These text files contain the results of the manual validity check described in the Methods section
 
 print('Batis:')
-CNNdata<-df.reviser('~/Desktop/SEM_submodel_scripts/BatisCheck.txt',preCNNdata,12)  #use column 12 for Batis (this is all dataframe dependent) ###redundancy here???
+CNNdata<-df.reviser('~/Desktop/SEM_submodel_scripts/BatisCheck.txt',preCNNdata,12)  #use column 12 for Batis (this is all dataframe dependent)
 print('Spartina:')
 CNNdata<-df.reviser('~/Desktop/SEM_submodel_scripts/SpartCheck.txt',CNNdata,9)  #use column 9 for Spartina
 print('Limonium:')
@@ -143,7 +143,6 @@ print(bin.avgs[1:5,])
 bin.avgs<-bin.avgs[,-1]
 print(bin.avgs[1:5,])
 ```
-###THIS ONE IS THE REAL ONE
 
 #Remake the relative abundance figure
 ```{r}
